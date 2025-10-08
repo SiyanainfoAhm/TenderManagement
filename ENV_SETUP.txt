@@ -1,0 +1,40 @@
+==================================================
+ENVIRONMENT SETUP - COPY THIS TO .env FILE
+==================================================
+
+Create a file named ".env" in the newtenderapp folder with this content:
+
+VITE_SUPABASE_URL=https://ecvqhfbiwqmqgiqfxheu.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjdnFoZmJpd3FtcWdpcWZ4aGV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUzMDEwMTksImV4cCI6MjA2MDg3NzAxOX0.rRF6VbPIRMucv2ePb4QFKA6gvmevrhqO0M_nTiWm5n4
+
+==================================================
+QUICK COMMAND (Windows PowerShell):
+==================================================
+
+cd newtenderapp
+@"
+VITE_SUPABASE_URL=https://ecvqhfbiwqmqgiqfxheu.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjdnFoZmJpd3FtcWdpcWZ4aGV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUzMDEwMTksImV4cCI6MjA2MDg3NzAxOX0.rRF6VbPIRMucv2ePb4QFKA6gvmevrhqO0M_nTiWm5n4
+"@ | Out-File -FilePath .env -Encoding utf8
+
+==================================================
+OR MANUAL STEPS:
+==================================================
+
+1. Open newtenderapp folder
+2. Create new file named: .env (no extension)
+3. Copy the two lines above (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY)
+4. Paste into the .env file
+5. Save the file
+
+==================================================
+VERIFY SETUP:
+==================================================
+
+After creating .env file, you should see:
+newtenderapp/
+  ├── .env  ← This file should exist
+  └── ...
+
+==================================================
+
