@@ -5,12 +5,13 @@ import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, loginWithGoogle } = useAuth()
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   })
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
 
   const handleSubmit = async (e: FormEvent) => {
@@ -24,6 +25,18 @@ export default function Login() {
       setError(err.message || 'Login failed. Please check your credentials.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleLogin = async () => {
+    setError('')
+    setGoogleLoading(true)
+
+    try {
+      await loginWithGoogle()
+    } catch (err: any) {
+      setError(err.message || 'Google login failed. Please try again.')
+      setGoogleLoading(false)
     }
   }
 
@@ -79,6 +92,29 @@ export default function Login() {
               Sign In
             </Button>
           </form>
+
+          {/* Divider */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-300"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white text-gray-500">Or continue with</span>
+            </div>
+          </div>
+
+          {/* Google OAuth Button */}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={handleGoogleLogin}
+            loading={googleLoading}
+            disabled={googleLoading || loading}
+          >
+            <i className="ri-google-fill text-lg mr-2"></i>
+            Sign in with Google
+          </Button>
 
           {/* Signup Link */}
           <div className="text-center mt-6 pt-6 border-t border-gray-200">

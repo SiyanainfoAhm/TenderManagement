@@ -5,7 +5,7 @@ import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
 
 export default function Signup() {
-  const { signup } = useAuth()
+  const { signup, loginWithGoogle } = useAuth()
   const [formData, setFormData] = useState({
     company_name: '',
     company_email: '',
@@ -15,6 +15,7 @@ export default function Signup() {
     confirm_password: ''
   })
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -57,6 +58,18 @@ export default function Signup() {
       setError(err.message || 'Signup failed. Please try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleSignup = async () => {
+    setError('')
+    setGoogleLoading(true)
+
+    try {
+      await loginWithGoogle()
+    } catch (err: any) {
+      setError(err.message || 'Google signup failed. Please try again.')
+      setGoogleLoading(false)
     }
   }
 
@@ -140,6 +153,30 @@ export default function Signup() {
               Create Account
             </Button>
           </form>
+
+          {/* Divider */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-300"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 bg-white text-gray-500">Or continue with</span>
+            </div>
+          </div>
+
+          {/* Google OAuth Button */}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={handleGoogleSignup}
+            loading={googleLoading}
+            disabled={googleLoading || loading}
+            size="lg"
+          >
+            <i className="ri-google-fill text-lg mr-2"></i>
+            Sign up with Google
+          </Button>
 
           {/* Login Link */}
           <div className="text-center mt-6 pt-6 border-t border-gray-200">

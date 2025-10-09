@@ -58,14 +58,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const loginWithGoogle = async () => {
+    try {
+      await authService.signInWithGoogle()
+    } catch (error: any) {
+      throw new Error(error.message || 'Google login failed')
+    }
+  }
+
   const logout = () => {
     setUser(null)
     localStorage.removeItem('tender_user')
+    // Clear Google OAuth state
+    sessionStorage.removeItem('google_oauth_state')
+    localStorage.removeItem('google_oauth_state_backup')
+    localStorage.removeItem('google_oauth_state_data')
     navigate('/login')
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, loginWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   )

@@ -128,6 +128,7 @@ export interface AuthContextType {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   signup: (data: SignupFormData) => Promise<void>
+  loginWithGoogle: () => Promise<void>
   logout: () => void
 }
 
