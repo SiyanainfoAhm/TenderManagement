@@ -51,7 +51,7 @@ export const authService = {
     // Use Google OAuth directly instead of Supabase's OAuth
     const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
     googleAuthUrl.searchParams.set('client_id', import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
-    googleAuthUrl.searchParams.set('redirect_uri', `http://localhost:5173/auth/callback`)
+    googleAuthUrl.searchParams.set('redirect_uri', `${window.location.origin}/auth/callback`)
     googleAuthUrl.searchParams.set('response_type', 'code')
     googleAuthUrl.searchParams.set('scope', 'openid email profile')
     googleAuthUrl.searchParams.set('access_type', 'offline')
@@ -165,7 +165,7 @@ export const authService = {
           client_secret: import.meta.env.VITE_GOOGLE_CLIENT_SECRET || '',
           code: authCode,
           grant_type: 'authorization_code',
-          redirect_uri: `http://localhost:5173/auth/callback`,
+          redirect_uri: `${window.location.origin}/auth/callback`,
         }),
       })
       
