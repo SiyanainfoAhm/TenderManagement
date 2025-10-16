@@ -15,23 +15,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Create transporter using MSG91 SMTP credentials
+    // Create transporter using Gmail SMTP
     const transporter = nodemailer.createTransport({
-      host: 'smtp.mailer91.com',
+      host: 'smtp.gmail.com',
       port: 587,
-      secure: false, // Use TLS
+      secure: false, // Use STARTTLS
       auth: {
-        user: 'emailer@ok5pr0.mailer91.com',
-        pass: 'TF5mOPAURXYqoX2q'
-      },
-      tls: {
-        rejectUnauthorized: false // For compatibility
+        user: process.env.GMAIL_USER || 'your-email@gmail.com', // Your Gmail address
+        pass: process.env.GMAIL_APP_PASSWORD || 'your-app-password' // Gmail App Password
       }
     })
 
     // Email options
     const mailOptions = {
-      from: '"Tender Manager" <emailer@ok5pr0.mailer91.com>',
+      from: `"Tender Manager" <${process.env.GMAIL_USER || 'your-email@gmail.com'}>`,
       to: to,
       subject: subject,
       html: html
