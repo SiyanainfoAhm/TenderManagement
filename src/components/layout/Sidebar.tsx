@@ -4,14 +4,14 @@ import { useAuth } from '@/contexts/AuthContext'
 export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
+  const { selectedCompany, logout } = useAuth()
 
   const menuItems = [
     { 
       path: '/dashboard', 
       icon: 'ri-dashboard-line', 
       label: 'Dashboard', 
-      roles: ['admin', 'user'] 
+      roles: ['admin', 'user', 'viewer'] 
     },
     { 
       path: '/tenders', 
@@ -27,8 +27,9 @@ export default function Sidebar() {
     },
   ]
 
+  // Filter menu items based on user's role in the selected company
   const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(user?.role || 'user')
+    item.roles.includes(selectedCompany?.role || 'viewer')
   )
 
   return (
@@ -43,10 +44,12 @@ export default function Sidebar() {
             <h1 className="text-lg font-bold text-gray-900">Tender Manager</h1>
           </div>
         </div>
-        <div className="text-sm text-gray-600 truncate" title={user?.company_name}>
-          <i className="ri-building-line mr-1"></i>
-          {user?.company_name}
-        </div>
+        {selectedCompany && (
+          <div className="text-sm text-gray-600 truncate" title={selectedCompany.company_name}>
+            <i className="ri-building-line mr-1"></i>
+            {selectedCompany.company_name}
+          </div>
+        )}
       </div>
 
       {/* Navigation */}
@@ -73,19 +76,8 @@ export default function Sidebar() {
         </ul>
       </nav>
 
-      {/* User Info & Logout */}
+      {/* Logout */}
       <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center mb-3 px-3">
-          <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center mr-3">
-            <span className="text-gray-700 text-sm font-semibold">
-              {user?.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{user?.full_name}</p>
-            <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-          </div>
-        </div>
         <button
           onClick={logout}
           className="w-full flex items-center px-4 py-3 rounded-lg text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-red-700 transition-colors"

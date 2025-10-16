@@ -9,12 +9,12 @@ interface BadgeProps {
 export default function Badge({ children, variant = 'gray', size = 'sm' }: BadgeProps) {
   const variants = {
     gray: 'bg-gray-100 text-gray-800',
-    blue: 'bg-blue-100 text-blue-800',
-    orange: 'bg-orange-100 text-orange-800',
-    red: 'bg-red-100 text-red-800',
-    purple: 'bg-purple-100 text-purple-800',
-    green: 'bg-green-100 text-green-800',
-    yellow: 'bg-yellow-100 text-yellow-800'
+    blue: 'bg-blue-500 text-white',
+    orange: 'bg-orange-500 text-white',
+    red: 'bg-red-500 text-white',
+    purple: 'bg-purple-500 text-white',
+    green: 'bg-green-500 text-white',
+    yellow: 'bg-yellow-500 text-white'
   }
   
   const sizes = {
@@ -23,7 +23,7 @@ export default function Badge({ children, variant = 'gray', size = 'sm' }: Badge
   }
   
   return (
-    <span className={`inline-flex items-center font-medium rounded-full ${variants[variant]} ${sizes[size]}`}>
+    <span className={`inline-flex items-center font-semibold rounded-full ${variants[variant]} ${sizes[size]}`}>
       {children}
     </span>
   )

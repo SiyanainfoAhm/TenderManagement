@@ -1,0 +1,32 @@
+TENDER MANAGEMENT DATABASE EXPORT REPORT
+============================================================
+
+Export Date: 10/14/2025, 9:53:56 AM
+Supabase URL: https://ecvqhfbiwqmqgiqfxheu.supabase.co
+
+Tables Exported:
+------------------------------------------------------------
+tender_companies               1 rows
+tender_users                   4 rows
+tender_tenders                 5 rows
+tender_tender_history          21 rows
+------------------------------------------------------------
+Total Rows: 31
+
+Files Generated:
+------------------------------------------------------------
+1. tender-management-full-export-2025-10-14T04-23-55-371Z.sql
+   - Complete SQL dump with schema and data
+
+2. tender_companies-2025-10-14T04-23-55-371Z.json
+   - JSON export (1 rows)
+
+3. tender_users-2025-10-14T04-23-55-371Z.json
+   - JSON export (4 rows)
+
+4. tender_tenders-2025-10-14T04-23-55-371Z.json
+   - JSON export (5 rows)
+
+5. tender_tender_history-2025-10-14T04-23-55-371Z.json
+   - JSON export (21 rows)
+

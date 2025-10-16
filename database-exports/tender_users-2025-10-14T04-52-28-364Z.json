@@ -1,0 +1,50 @@
+[
+  {
+    "id": "1589a6c5-b3b2-4257-b0db-ebb2624b38b1",
+    "company_id": "d900385a-98f8-48a6-990c-f18b1a3a460b",
+    "full_name": "Deven Patel",
+    "email": "ceorraahmedabad@gmail.com",
+    "password_hash": "",
+    "role": "admin",
+    "is_active": true,
+    "last_login": null,
+    "created_at": "2025-10-10T05:10:23.816074+00:00",
+    "updated_at": "2025-10-10T06:01:16.392812+00:00"
+  },
+  {
+    "id": "d21dd7c5-9bbd-436b-8ffc-d1f5aed7671f",
+    "company_id": "d900385a-98f8-48a6-990c-f18b1a3a460b",
+    "full_name": "Mihir Patel",
+    "email": "aminmihirh@gmail.com",
+    "password_hash": "$2a$10$IPEAbXEaRohHM24lgMKT6Ob/5vHu/xmv3MN64cz3G1ZjKAQ3G.RW2",
+    "role": "admin",
+    "is_active": true,
+    "last_login": null,
+    "created_at": "2025-10-10T06:23:06.484567+00:00",
+    "updated_at": "2025-10-10T06:23:06.484567+00:00"
+  },
+  {
+    "id": "3a1f6d4e-0c47-4a25-80e9-fd473ce397d1",
+    "company_id": "d900385a-98f8-48a6-990c-f18b1a3a460b",
+    "full_name": "asd",
+    "email": "ads@gmail.com",
+    "password_hash": "$2a$10$t80CCZiwIAKa2RVrvk2JHujOkoOZWw6XeKX5h0EZbaxi6spjyOTKq",
+    "role": "admin",
+    "is_active": false,
+    "last_login": null,
+    "created_at": "2025-10-13T03:03:38.608832+00:00",
+    "updated_at": "2025-10-13T03:04:52.097311+00:00"
+  },
+  {
+    "id": "f062febc-6920-4617-acf4-052ffc6117f0",
+    "company_id": "d900385a-98f8-48a6-990c-f18b1a3a460b",
+    "full_name": "Shashank Sharma",
+    "email": "siyana.social@gmail.com",
+    "password_hash": "$2a$10$6I8bGaspiK7jj6AhdflIT.zTVnmnxEXxgDK.xi0GC68K/9rbKwUna",
+    "role": "admin",
+    "is_active": true,
+    "last_login": null,
+    "created_at": "2025-10-13T03:49:42.414756+00:00",
+    "updated_at": "2025-10-13T03:49:42.414756+00:00"
+  }
+]

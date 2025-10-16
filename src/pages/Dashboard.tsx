@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { dashboardService } from '@/services/dashboardService'
 import { tenderService } from '@/services/tenderService'
+import { invitationService, PendingInvitation } from '@/services/invitationService'
 import { DashboardStats, TenderWithUser } from '@/types'
 import MainLayout from '@/components/layout/MainLayout'
 import Badge from '@/components/base/Badge'
+import PendingInvitationsModal from '@/components/invitations/PendingInvitationsModal'
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, selectedCompany } = useAuth()
   const [stats, setStats] = useState<DashboardStats>({
     total_tenders: 0,
     submitted_bids: 0,
@@ -17,23 +19,78 @@ export default function Dashboard() {
   })
   const [upcomingDeadlines, setUpcomingDeadlines] = useState<TenderWithUser[]>([])
   const [loading, setLoading] = useState(true)
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
+  const [showInvitationsModal, setShowInvitationsModal] = useState(false)
+
 
   useEffect(() => {
     loadDashboardData()
+    checkPendingInvitations()
+  }, [user, selectedCompany])
+
+  // Also check for pending invitations when selectedCompany changes
+  useEffect(() => {
+    if (user) {
+      console.log('Selected company changed, checking pending invitations...')
+      checkPendingInvitations()
+    }
+  }, [selectedCompany, user])
+
+  // Also check for pending invitations when component mounts/focuses
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user) {
+        console.log('Window focused, checking pending invitations...')
+        checkPendingInvitations()
+      }
+    }
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (user && event.persisted) {
+        console.log('Page restored from cache, checking pending invitations...')
+        checkPendingInvitations()
+      }
+    }
+
+    // Check when window gains focus (user returns from another tab/page)
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('pageshow', handlePageShow)
+    
+    // Check immediately when component mounts
+    if (user) {
+      checkPendingInvitations()
+    }
+
+    // Also check if we came from an invitation page (check URL parameters)
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('from') === 'invitation') {
+      console.log('Returned from invitation page, checking pending invitations...')
+      setTimeout(() => checkPendingInvitations(), 500) // Small delay to ensure database is updated
+    }
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('pageshow', handlePageShow)
+    }
   }, [user])
 
   const loadDashboardData = async () => {
-    if (!user) return
+    if (!user || !selectedCompany) {
+      setLoading(false)
+      return
+    }
 
     try {
       setLoading(true)
-      const [statsData, deadlinesData] = await Promise.all([
-        dashboardService.getCompanyStats(user.company_id),
-        tenderService.getUpcomingDeadlines(user.company_id, 7)
+      const [statsData, deadlinesData, statusCountsData] = await Promise.all([
+        dashboardService.getCompanyStats(selectedCompany.company_id),
+        tenderService.getUpcomingDeadlines(selectedCompany.company_id, 7),
+        tenderService.getStatusCounts(selectedCompany.company_id)
       ])
 
       setStats(statsData)
       setUpcomingDeadlines(deadlinesData)
+      setStatusCounts(statusCountsData)
     } catch (error: any) {
       console.error('Failed to load dashboard data:', error)
     } finally {
@@ -41,32 +98,165 @@ export default function Dashboard() {
     }
   }
 
-  const statCards = [
+  const checkPendingInvitations = async () => {
+    if (!user) return
+
+    try {
+      console.log('Checking pending invitations for:', user.email)
+      const invitations = await invitationService.getPendingInvitations(user.email)
+      console.log('Found invitations:', invitations)
+      
+      if (invitations && invitations.length > 0) {
+        setPendingInvitations(invitations)
+        setShowInvitationsModal(true)
+        console.log('Showing invitations modal with', invitations.length, 'invitations')
+      } else {
+        // Ensure modal is hidden if no invitations
+        setPendingInvitations([])
+        setShowInvitationsModal(false)
+        console.log('No pending invitations found, hiding modal')
+      }
+    } catch (error: any) {
+      console.error('Failed to check pending invitations:', error)
+      setPendingInvitations([])
+      setShowInvitationsModal(false)
+    }
+  }
+
+  // Status counts for the new dashboard
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
+  const [showAllStatuses, setShowAllStatuses] = useState(false)
+
+  const mainStatCards = [
     { 
       label: 'Total Tenders', 
       value: stats.total_tenders, 
       icon: 'ri-file-list-3-line', 
-      color: 'blue' 
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
     },
     { 
-      label: 'Submitted Bids', 
-      value: stats.submitted_bids, 
+      label: 'Assigned', 
+      value: statusCounts.assigned || 0, 
+      icon: 'ri-user-line', 
+      color: 'purple',
+      bgColor: 'bg-purple-50',
+      iconColor: 'text-purple-600'
+    },
+    { 
+      label: 'Submitted', 
+      value: statusCounts.submitted || 0, 
       icon: 'ri-send-plane-line', 
-      color: 'green' 
+      color: 'green',
+      bgColor: 'bg-green-50',
+      iconColor: 'text-green-600'
+    },
+    { 
+      label: 'Won', 
+      value: statusCounts.won || 0, 
+      icon: 'ri-trophy-line', 
+      color: 'yellow',
+      bgColor: 'bg-yellow-50',
+      iconColor: 'text-yellow-600'
     },
     { 
       label: 'Not Bidding', 
-      value: stats.not_bidding, 
+      value: statusCounts['not-bidding'] || 0, 
       icon: 'ri-close-circle-line', 
-      color: 'red' 
-    },
-    { 
-      label: 'Active Users', 
-      value: stats.active_users, 
-      icon: 'ri-team-line', 
-      color: 'purple' 
+      color: 'red',
+      bgColor: 'bg-red-50',
+      iconColor: 'text-red-600'
     }
   ]
+
+  const statusCards = [
+    { 
+      label: 'Under Study', 
+      value: statusCounts['under-study'] || 0, 
+      icon: 'ri-book-open-line', 
+      color: 'gray',
+      bgColor: 'bg-gray-50',
+      iconColor: 'text-gray-600'
+    },
+    { 
+      label: 'On Hold', 
+      value: statusCounts['on-hold'] || 0, 
+      icon: 'ri-pause-circle-line', 
+      color: 'orange',
+      bgColor: 'bg-orange-50',
+      iconColor: 'text-orange-600'
+    },
+    { 
+      label: 'Will Bid', 
+      value: statusCounts['will-bid'] || 0, 
+      icon: 'ri-heart-line', 
+      color: 'teal',
+      bgColor: 'bg-teal-50',
+      iconColor: 'text-teal-600'
+    },
+    { 
+      label: 'Pre-Bid', 
+      value: statusCounts['pre-bid'] || 0, 
+      icon: 'ri-time-line', 
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
+    },
+    { 
+      label: 'Wait for Corrigendum', 
+      value: statusCounts['wait-for-corrigendum'] || 0, 
+      icon: 'ri-file-check-line', 
+      color: 'orange',
+      bgColor: 'bg-orange-50',
+      iconColor: 'text-orange-600'
+    },
+    { 
+      label: 'In Preparation', 
+      value: statusCounts['in-preparation'] || 0, 
+      icon: 'ri-edit-line', 
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
+    },
+    { 
+      label: 'Under Evaluation', 
+      value: statusCounts['under-evaluation'] || 0, 
+      icon: 'ri-search-line', 
+      color: 'teal',
+      bgColor: 'bg-teal-50',
+      iconColor: 'text-teal-600'
+    },
+    { 
+      label: 'Qualified', 
+      value: statusCounts.qualified || 0, 
+      icon: 'ri-checkbox-circle-line', 
+      color: 'green',
+      bgColor: 'bg-green-50',
+      iconColor: 'text-green-600'
+    },
+    { 
+      label: 'Not Qualified', 
+      value: statusCounts['not-qualified'] || 0, 
+      icon: 'ri-close-circle-line', 
+      color: 'red',
+      bgColor: 'bg-red-50',
+      iconColor: 'text-red-600'
+    },
+    { 
+      label: 'Lost', 
+      value: statusCounts.lost || 0, 
+      icon: 'ri-emotion-sad-line', 
+      color: 'gray',
+      bgColor: 'bg-gray-50',
+      iconColor: 'text-gray-600'
+    }
+  ]
+
+  // First 5 status cards (shown by default)
+  const firstRowStatusCards = statusCards.slice(0, 5)
+  // Remaining status cards (shown when expanded)
+  const secondRowStatusCards = statusCards.slice(5)
 
   const getDaysLeft = (lastDate: string) => {
     const today = new Date()
@@ -101,16 +291,16 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {statCards.map((stat, index) => (
+            {/* Main Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+              {mainStatCards.map((stat, index) => (
                 <div 
                   key={index} 
-                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
+                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
                 >
                   <div className="flex items-center">
-                    <div className={`w-12 h-12 bg-${stat.color}-100 rounded-lg flex items-center justify-center`}>
-                      <i className={`${stat.icon} text-${stat.color}-600 text-xl`}></i>
+                    <div className={`w-12 h-12 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
+                      <i className={`${stat.icon} ${stat.iconColor} text-xl`}></i>
                     </div>
                     <div className="ml-4">
                       <p className="text-sm font-medium text-gray-600">{stat.label}</p>
@@ -120,6 +310,68 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+
+            {/* Show Less Button */}
+            <div className="flex justify-center mb-8">
+              <button
+                onClick={() => setShowAllStatuses(!showAllStatuses)}
+                className="flex items-center px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+              >
+                {showAllStatuses ? (
+                  <>
+                    <i className="ri-arrow-up-s-line mr-1"></i>
+                    Show Less
+                  </>
+                ) : (
+                  <>
+                    <i className="ri-arrow-down-s-line mr-1"></i>
+                    Show All
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* First Row Status Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
+              {firstRowStatusCards.map((status, index) => (
+                <div 
+                  key={index} 
+                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
+                >
+                  <div className="flex items-center">
+                    <div className={`w-12 h-12 ${status.bgColor} rounded-lg flex items-center justify-center`}>
+                      <i className={`${status.icon} ${status.iconColor} text-xl`}></i>
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">{status.label}</p>
+                      <p className="text-2xl font-bold text-gray-900">{status.value}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Second Row Status Cards (shown when expanded) */}
+            {showAllStatuses && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+                {secondRowStatusCards.map((status, index) => (
+                  <div 
+                    key={index + 5} 
+                    className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
+                  >
+                    <div className="flex items-center">
+                      <div className={`w-12 h-12 ${status.bgColor} rounded-lg flex items-center justify-center`}>
+                        <i className={`${status.icon} ${status.iconColor} text-xl`}></i>
+                      </div>
+                      <div className="ml-4">
+                        <p className="text-sm font-medium text-gray-600">{status.label}</p>
+                        <p className="text-2xl font-bold text-gray-900">{status.value}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Upcoming Deadlines */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200">
@@ -181,6 +433,15 @@ export default function Dashboard() {
               </div>
             </div>
           </>
+        )}
+
+        {/* Pending Invitations Modal - Only show if there are actual invitations */}
+        {pendingInvitations.length > 0 && (
+          <PendingInvitationsModal
+            isOpen={showInvitationsModal}
+            invitations={pendingInvitations}
+            onClose={() => setShowInvitationsModal(false)}
+          />
         )}
       </div>
     </MainLayout>

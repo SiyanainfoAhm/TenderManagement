@@ -8,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const { user, loading } = useAuth()
+  const { user, selectedCompany, loading } = useAuth()
 
   if (loading) {
     return (
@@ -25,7 +25,8 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
     return <Navigate to="/login" replace />
   }
 
-  if (requireAdmin && user.role !== 'admin') {
+  // Check role in selected company for multi-company support
+  if (requireAdmin && selectedCompany?.role !== 'admin') {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-md">
@@ -33,6 +34,9 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
           <p className="text-gray-600 mb-6">
             You don't have permission to access this page. Please contact your administrator.
+          </p>
+          <p className="text-sm text-gray-500 mb-6">
+            Your role in {selectedCompany?.company_name || 'this company'}: <strong>{selectedCompany?.role || 'viewer'}</strong>
           </p>
           <button
             onClick={() => window.history.back()}

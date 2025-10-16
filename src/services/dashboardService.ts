@@ -1,10 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import { DashboardStats } from '@/types'
+import { getFunctionName } from '@/config/database'
 
 export const dashboardService = {
   // Get dashboard statistics for a company
   async getCompanyStats(companyId: string): Promise<DashboardStats> {
-    const { data, error } = await supabase.rpc('tender_get_company_stats', {
+    const { data, error } = await supabase.rpc(getFunctionName('get_company_stats'), {
       p_company_id: companyId
     })
 

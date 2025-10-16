@@ -1,16 +1,19 @@
-import { useState, FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, FormEvent, useEffect } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
 
 export default function Signup() {
-  const { signup, loginWithGoogle } = useAuth()
+  const { signup, loginWithGoogle, user } = useAuth()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const emailParam = searchParams.get('email')
   const [formData, setFormData] = useState({
     company_name: '',
-    company_email: '',
+    company_email: emailParam || '',
     full_name: '',
-    email: '',
+    email: emailParam || '',
     password: '',
     confirm_password: ''
   })
@@ -18,6 +21,19 @@ export default function Signup() {
   const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [pageLoaded, setPageLoaded] = useState(false)
+  const isFromInvitation = sessionStorage.getItem('pending_invitation') !== null
+
+  // Mark page as loaded after component mounts
+  useEffect(() => {
+    // Wait for page to be fully loaded and rendered
+    const timer = setTimeout(() => {
+      setPageLoaded(true)
+      console.log('Signup page fully loaded')
+    }, 100) // Small delay to ensure DOM is ready
+
+    return () => clearTimeout(timer)
+  }, [])
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {}
@@ -34,6 +50,28 @@ export default function Signup() {
     return Object.keys(newErrors).length === 0
   }
 
+  // Redirect if user is already logged in (only after page is loaded)
+  useEffect(() => {
+    if (user && pageLoaded) {
+      console.log('User session found after page load, redirecting from signup...')
+      
+      const pendingInvitation = sessionStorage.getItem('pending_invitation')
+      if (pendingInvitation) {
+        try {
+          const invitation = JSON.parse(pendingInvitation)
+          console.log('Redirecting to invitation:', invitation.token)
+          navigate(`/invitations/${invitation.token}`, { replace: true })
+        } catch (err) {
+          console.error('Failed to parse pending invitation:', err)
+          navigate('/dashboard', { replace: true })
+        }
+      } else {
+        console.log('Redirecting to dashboard')
+        navigate('/dashboard', { replace: true })
+      }
+    }
+  }, [user, pageLoaded, navigate])
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
@@ -46,14 +84,20 @@ export default function Signup() {
     setLoading(true)
 
     try {
-      // Sync company info with user info
-      const signupData = {
+      // If from invitation, don't create a company - they'll join existing one
+      const signupData = isFromInvitation ? {
+        ...formData,
+        company_name: '', // Will be added to company via invitation
+        company_email: formData.email,
+        company_phone: undefined
+      } : {
         ...formData,
         company_name: formData.full_name,
         company_email: formData.email,
         company_phone: undefined
       }
       await signup(signupData)
+      // Navigation happens in useEffect after user state updates
     } catch (err: any) {
       setError(err.message || 'Signup failed. Please try again.')
     } finally {

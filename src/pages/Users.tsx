@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { userService } from '@/services/userService'
-import { User, UserFormData } from '@/types'
+import { CompanyMember, UserFormData } from '@/types'
 import MainLayout from '@/components/layout/MainLayout'
 import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
 import Select from '@/components/base/Select'
 import Modal from '@/components/base/Modal'
 import Badge from '@/components/base/Badge'
+import InviteUserModal from '@/components/users/InviteUserModal'
 
 export default function Users() {
-  const { user: currentUser } = useAuth()
-  const [users, setUsers] = useState<User[]>([])
+  const { user: currentUser, selectedCompany } = useAuth()
+  const [users, setUsers] = useState<CompanyMember[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -20,14 +21,12 @@ export default function Users() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 25
 
-  // Filter
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
-
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [selectedUser, setSelectedUser] = useState<CompanyMember | null>(null)
 
   // Form data
   const [formData, setFormData] = useState<UserFormData>({
@@ -42,11 +41,11 @@ export default function Users() {
   }, [currentUser])
 
   const loadUsers = async () => {
-    if (!currentUser) return
+    if (!currentUser || !selectedCompany) return
 
     try {
       setLoading(true)
-      const usersData = await userService.getCompanyUsers(currentUser.company_id)
+      const usersData = await userService.getCompanyUsers(selectedCompany.company_id)
       setUsers(usersData)
     } catch (error: any) {
       console.error('Failed to load users:', error)
@@ -71,7 +70,7 @@ export default function Users() {
     setIsAddModalOpen(true)
   }
 
-  const handleEdit = (user: User) => {
+  const handleEdit = (user: CompanyMember) => {
     setSelectedUser(user)
     setFormData({
       full_name: user.full_name,
@@ -83,13 +82,13 @@ export default function Users() {
     setIsEditModalOpen(true)
   }
 
-  const handleDelete = (user: User) => {
+  const handleDelete = (user: CompanyMember) => {
     setSelectedUser(user)
     setIsDeleteModalOpen(true)
   }
 
   const handleSubmitAdd = async () => {
-    if (!currentUser) return
+    if (!currentUser || !selectedCompany) return
 
     if (!formData.password || formData.password.length < 6) {
       setError('Password must be at least 6 characters')
@@ -99,10 +98,22 @@ export default function Users() {
     try {
       setSubmitting(true)
       setError('')
-      await userService.createUser(currentUser.company_id, formData)
-      await loadUsers()
-      setIsAddModalOpen(false)
-      resetForm()
+      
+      // Try to create new user first
+      try {
+        await userService.createUser(selectedCompany.company_id, formData)
+        await loadUsers()
+        setIsAddModalOpen(false)
+        resetForm()
+      } catch (createError: any) {
+        // If email already exists, check if we should add them to this company
+        if (createError.message.includes('Email already exists')) {
+          // Show helpful message
+          setError(`Email ${formData.email} already exists. This user is already registered in the system. If you want to add them to your company, please use the "Invite User" feature (coming soon) or ask them to login and you can assign them access.`)
+        } else {
+          throw createError
+        }
+      }
     } catch (error: any) {
       setError(error.message || 'Failed to create user')
     } finally {
@@ -111,15 +122,17 @@ export default function Users() {
   }
 
   const handleSubmitEdit = async () => {
-    if (!selectedUser) return
+    if (!selectedUser || !selectedCompany) return
 
     try {
       setSubmitting(true)
       setError('')
-      await userService.updateUser(selectedUser.id, {
-        full_name: formData.full_name,
-        role: formData.role
+      // Update user's basic info
+      await userService.updateUser(selectedUser.user_id, {
+        full_name: formData.full_name
       })
+      // Update user's role in this company
+      await userService.updateUserRole(selectedUser.user_id, selectedCompany.company_id, formData.role)
       await loadUsers()
       setIsEditModalOpen(false)
       setSelectedUser(null)
@@ -132,17 +145,17 @@ export default function Users() {
   }
 
   const handleConfirmDelete = async () => {
-    if (!selectedUser) return
+    if (!selectedUser || !selectedCompany) return
 
     // Prevent deleting yourself
-    if (selectedUser.id === currentUser?.id) {
+    if (selectedUser.user_id === currentUser?.id) {
       setError('You cannot delete your own account')
       return
     }
 
     try {
       setSubmitting(true)
-      await userService.deleteUser(selectedUser.id)
+      await userService.deleteUserFromCompany(selectedUser.user_id, selectedCompany.company_id)
       await loadUsers()
       setIsDeleteModalOpen(false)
       setSelectedUser(null)
@@ -153,18 +166,20 @@ export default function Users() {
     }
   }
 
-  const handleToggleActive = async (user: User) => {
+  const handleToggleActive = async (user: CompanyMember) => {
+    if (!selectedCompany) return
+    
     // Prevent deactivating yourself
-    if (user.id === currentUser?.id) {
+    if (user.user_id === currentUser?.id) {
       setError('You cannot deactivate your own account')
       return
     }
 
     try {
       if (user.is_active) {
-        await userService.deleteUser(user.id)
+        await userService.removeUserFromCompany(user.user_id, selectedCompany.company_id)
       } else {
-        await userService.activateUser(user.id)
+        await userService.restoreUserToCompany(user.user_id, selectedCompany.company_id)
       }
       await loadUsers()
     } catch (error: any) {
@@ -189,12 +204,8 @@ export default function Users() {
     { value: 'admin', label: 'Admin' }
   ]
 
-  // Filter users based on status
-  const filteredUsers = users.filter(user => {
-    if (statusFilter === 'active') return user.is_active
-    if (statusFilter === 'inactive') return !user.is_active
-    return true // 'all'
-  })
+  // Show all users (filter removed)
+  const filteredUsers = users
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredUsers.length / itemsPerPage)
@@ -212,10 +223,12 @@ export default function Users() {
             <h1 className="text-2xl font-bold text-gray-900">Users</h1>
             <p className="text-gray-600 mt-1">Manage team members and their access</p>
           </div>
-          <Button onClick={handleAdd}>
-            <i className="ri-add-line mr-2"></i>
-            Add User
-          </Button>
+          <div className="flex gap-3">
+            <Button onClick={() => setIsInviteModalOpen(true)}>
+              <i className="ri-user-add-line mr-2"></i>
+              Add User
+            </Button>
+          </div>
         </div>
 
         {/* Global Error */}
@@ -232,52 +245,6 @@ export default function Users() {
         )}
 
         {/* Filter */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex items-center gap-4">
-            <label className="text-sm font-medium text-gray-700">Filter by status:</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setStatusFilter('all')
-                  setCurrentPage(1)
-                }}
-                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                  statusFilter === 'all'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                All Users
-              </button>
-              <button
-                onClick={() => {
-                  setStatusFilter('active')
-                  setCurrentPage(1)
-                }}
-                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                  statusFilter === 'active'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                Active Only
-              </button>
-              <button
-                onClick={() => {
-                  setStatusFilter('inactive')
-                  setCurrentPage(1)
-                }}
-                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                  statusFilter === 'inactive'
-                    ? 'bg-red-100 text-red-700'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                Inactive Only
-              </button>
-            </div>
-          </div>
-        </div>
 
         {/* Table */}
         {loading ? (
@@ -294,7 +261,6 @@ export default function Users() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Login</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
@@ -308,7 +274,7 @@ export default function Users() {
                     </tr>
                   ) : (
                     currentUsers.map((user) => (
-                      <tr key={user.id} className="hover:bg-gray-50">
+                      <tr key={user.user_id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <div className="flex items-center">
                             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
@@ -318,7 +284,7 @@ export default function Users() {
                             </div>
                             <div>
                               <p className="text-sm font-medium text-gray-900">{user.full_name}</p>
-                              {user.id === currentUser?.id && (
+                              {user.user_id === currentUser?.id && (
                                 <span className="text-xs text-gray-500">(You)</span>
                               )}
                             </div>
@@ -327,34 +293,21 @@ export default function Users() {
                         <td className="px-6 py-4 text-sm text-gray-600">{user.email}</td>
                         <td className="px-6 py-4">{getRoleBadge(user.role)}</td>
                         <td className="px-6 py-4">{getStatusBadge(user.is_active)}</td>
-                        <td className="px-6 py-4 text-sm text-gray-600">
-                          {user.last_login 
-                            ? new Date(user.last_login).toLocaleString() 
-                            : 'Never'}
-                        </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => handleEdit(user)}
                               className="text-gray-600 hover:text-gray-700"
                               title="Edit"
-                              disabled={user.id === currentUser?.id && user.role === 'admin' && users.filter(u => u.role === 'admin' && u.is_active).length === 1}
+                              disabled={user.user_id === currentUser?.id && user.role === 'admin' && users.filter(u => u.role === 'admin' && u.is_active).length === 1}
                             >
                               <i className="ri-edit-line text-lg"></i>
-                            </button>
-                            <button
-                              onClick={() => handleToggleActive(user)}
-                              className={`${user.is_active ? 'text-orange-600 hover:text-orange-700' : 'text-green-600 hover:text-green-700'}`}
-                              title={user.is_active ? 'Deactivate User' : 'Activate User'}
-                              disabled={user.id === currentUser?.id}
-                            >
-                              <i className={`ri-${user.is_active ? 'user-unfollow' : 'user-add'}-line text-lg`}></i>
                             </button>
                             <button
                               onClick={() => handleDelete(user)}
                               className="text-red-600 hover:text-red-700"
                               title="Delete"
-                              disabled={user.id === currentUser?.id}
+                              disabled={user.user_id === currentUser?.id}
                             >
                               <i className="ri-delete-bin-line text-lg"></i>
                             </button>
@@ -372,7 +325,6 @@ export default function Users() {
               <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
                 <div className="text-sm text-gray-700">
                   Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredUsers.length)} of {filteredUsers.length} users
-                  {statusFilter !== 'all' && ` (${statusFilter} only)`}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -528,13 +480,6 @@ export default function Users() {
               required
             />
 
-            <div className="p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <i className="ri-information-line mr-1"></i>
-                To change password, the user must use the "Change Password" feature in their account settings.
-              </p>
-            </div>
-
             <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
               <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
               <Button onClick={handleSubmitEdit} loading={submitting}>Update User</Button>
@@ -557,6 +502,16 @@ export default function Users() {
             </div>
           </div>
         </Modal>
+
+        {/* Invite Existing User Modal */}
+        <InviteUserModal
+          isOpen={isInviteModalOpen}
+          onClose={() => setIsInviteModalOpen(false)}
+          onSuccess={() => {
+            loadUsers()
+            setIsInviteModalOpen(false)
+          }}
+        />
       </div>
     </MainLayout>
   )

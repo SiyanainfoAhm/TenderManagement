@@ -1,0 +1,20 @@
+TENDER MANAGEMENT DATABASE EXPORT REPORT
+============================================================
+
+Export Date: 10/14/2025, 10:12:31 AM
+Supabase URL: https://ecvqhfbiwqmqgiqfxheu.supabase.co
+
+Tables Exported:
+------------------------------------------------------------
+tender_companies               ERROR: relation "public.tender_companies" does not exist
+tender_users                   ERROR: relation "public.tender_users" does not exist
+tender_tenders                 ERROR: relation "public.tender_tenders" does not exist
+tender_tender_history          ERROR: relation "public.tender_tender_history" does not exist
+------------------------------------------------------------
+Total Rows: 0
+
+Files Generated:
+------------------------------------------------------------
+1. tender-management-full-export-2025-10-14T04-42-31-073Z.sql
+   - Complete SQL dump with schema and data
+

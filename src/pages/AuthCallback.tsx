@@ -6,6 +6,7 @@ export default function AuthCallback() {
   const navigate = useNavigate()
   const [error, setError] = useState<string>('')
   const [currentStep, setCurrentStep] = useState<string>('Initializing...')
+  const [countdown, setCountdown] = useState<number>(0)
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -30,29 +31,101 @@ export default function AuthCallback() {
           setCurrentStep('Step 3: Storing user data...')
           console.log('Step 3: Storing user data...')
           localStorage.setItem('tender_user', JSON.stringify(userData))
-          console.log('Step 3 SUCCESS - User data stored:', userData)
+          
+          // Also store selected company if available
+          if (userData.selectedCompany) {
+            console.log('Step 3: Storing selected company:', userData.selectedCompany.company_name)
+            localStorage.setItem('tender_selected_company', JSON.stringify(userData.selectedCompany))
+          }
+          
+          // Wait a moment and verify the data was actually stored
+          await new Promise(resolve => setTimeout(resolve, 300))
+          
+          // Verify storage
+          const verifyStored = localStorage.getItem('tender_user')
+          if (!verifyStored) {
+            console.error('Step 3 FAILED - User data not found in localStorage after storage!')
+            throw new Error('Failed to store user data')
+          }
+          
+          const verifyStoredCompany = localStorage.getItem('tender_selected_company')
+          console.log('Step 3 SUCCESS - User data stored and verified:', userData)
+          console.log('Step 3: User has', userData.companies?.length || 0, 'companies')
+          console.log('Step 3: Selected company stored?', !!verifyStoredCompany)
           
           // Step 4: Clean up URL and session storage
           setCurrentStep('Step 4: Finalizing...')
           console.log('Step 4: Cleaning up URL and session storage...')
           window.history.replaceState({}, document.title, '/dashboard')
           
-          // Clear any OAuth-related sessionStorage
+          // Clear any OAuth-related sessionStorage (but keep pending_invitation)
+          const pendingInvitation = sessionStorage.getItem('pending_invitation')
+          console.log('Step 4: Checking for pending invitation:', pendingInvitation ? 'Found' : 'None')
+          
           const keys = Object.keys(sessionStorage)
           keys.forEach(key => {
-            if (key.startsWith('processed_code_') || key.startsWith('google_oauth_')) {
+            if ((key.startsWith('processed_code_') || key.startsWith('google_oauth_')) && key !== 'pending_invitation') {
               sessionStorage.removeItem(key)
             }
           })
-          console.log('Step 4 SUCCESS - Cleanup completed')
+          console.log('Step 4 SUCCESS - Cleanup completed, pending invitation preserved:', !!pendingInvitation)
           
-          // Step 5: Navigate to dashboard
+          // Step 5: Navigate to dashboard with countdown
           setCurrentStep('Step 5: Redirecting to dashboard...')
-          console.log('Step 5: Navigating to dashboard...')
-          await new Promise(resolve => setTimeout(resolve, 200)) // Small delay before navigation
-          navigate('/dashboard', { replace: true })
-          console.log('Step 5 SUCCESS - Navigation initiated')
-          console.log('=== GOOGLE OAUTH CALLBACK PROCESS COMPLETED SUCCESSFULLY ===')
+          console.log('Step 5: Waiting 5 seconds before navigating to dashboard...')
+          
+          // Countdown from 5 to 0
+          for (let i = 5; i > 0; i--) {
+            setCountdown(i)
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+          setCountdown(0)
+          
+          // Step 6: Verify session before navigation
+          setCurrentStep('Step 6: Verifying session...')
+          console.log('Step 6: Countdown complete, verifying session...')
+          
+          // Give localStorage one more moment to ensure data is persisted
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          const storedUser = localStorage.getItem('tender_user')
+          console.log('Step 6: Checking localStorage for session data...')
+          console.log('Step 6: Session data exists?', !!storedUser)
+          
+          if (storedUser) {
+            try {
+              const userSession = JSON.parse(storedUser)
+              
+              // Validate session data structure
+              if (!userSession.id || !userSession.email) {
+                throw new Error('Invalid session data structure')
+              }
+              
+              console.log('Step 6: Session verified for user:', userSession.email)
+              console.log('Step 6: User ID:', userSession.id)
+              console.log('Step 6: User has', userSession.companies?.length || 0, 'companies')
+              console.log('Step 6: Selected company:', userSession.selectedCompany?.company_name || 'None')
+              
+              // Session found and valid, force page reload to refresh AuthContext
+              console.log('Step 6: Session valid, reloading page to refresh AuthContext...')
+              console.log('Step 6 SUCCESS - Initiating page reload')
+              console.log('=== GOOGLE OAUTH CALLBACK PROCESS COMPLETED SUCCESSFULLY ===')
+              
+              // Use window.location.href instead of navigate to force a full page reload
+              // This ensures AuthContext picks up the new session from localStorage
+              window.location.href = '/dashboard'
+            } catch (err) {
+              console.error('Step 6 FAILED - Invalid session data:', err)
+              console.error('Step 6: Stored user data:', storedUser)
+              setError('Session verification failed. Please try logging in again.')
+              setTimeout(() => navigate('/login', { replace: true }), 2000)
+            }
+          } else {
+            console.error('Step 6 FAILED - No session found in localStorage')
+            console.error('Step 6: All localStorage keys:', Object.keys(localStorage))
+            setError('No active session found. Please login again.')
+            setTimeout(() => navigate('/login', { replace: true }), 2000)
+          }
         } else {
           console.error('Step 2 FAILED - No user data returned from OAuth callback')
           console.log('FALLBACK: Navigating to dashboard despite authentication failure')
@@ -110,9 +183,18 @@ export default function AuthCallback() {
           <div className="bg-gray-100 rounded-lg p-3 mb-4">
             <p className="text-sm text-gray-700 font-medium">{currentStep}</p>
           </div>
-          <div className="flex justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          </div>
+          {countdown > 0 ? (
+            <div className="flex flex-col items-center justify-center">
+              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-2">
+                <span className="text-2xl font-bold text-white">{countdown}</span>
+              </div>
+              <p className="text-sm text-gray-600">Redirecting in {countdown} second{countdown !== 1 ? 's' : ''}...</p>
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          )}
         </div>
       </div>
     </div>

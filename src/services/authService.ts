@@ -1,10 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import { SignupFormData, UserWithCompany } from '@/types'
+import { getFunctionName, getTableName } from '@/config/database'
 
 export const authService = {
-  // Authenticate user
+  // Authenticate user (multi-company)
   async login(email: string, password: string): Promise<UserWithCompany> {
-    const { data, error } = await supabase.rpc('tender_authenticate_user', {
+    const { data, error } = await supabase.rpc(getFunctionName('authenticate_user'), {
       user_email: email,
       user_password: password
     })
@@ -13,16 +14,25 @@ export const authService = {
     if (!data || data.length === 0) throw new Error('Invalid credentials')
 
     const userData = data[0]
+    
+    // Parse companies from JSONB
+    const companies = typeof userData.companies === 'string' 
+      ? JSON.parse(userData.companies)
+      : userData.companies || []
+    
+    // Find default company or use first
+    const selectedCompany = companies.find((c: any) => c.is_default) || companies[0] || null
+    
     return {
       id: userData.user_id,
-      company_id: userData.company_id,
-      company_name: userData.company_name,
       full_name: userData.full_name,
       email: userData.email,
-      role: userData.role,
       is_active: userData.is_active,
+      companies: companies,
+      selectedCompany: selectedCompany,
       created_at: '',
-      updated_at: ''
+      updated_at: '',
+      last_login: ''
     }
   },
 
@@ -48,6 +58,17 @@ export const authService = {
     
     console.log('Generated state parameter:', state)
     
+    // Clear any existing OAuth data before starting new flow
+    console.log('Clearing previous OAuth data...')
+    const existingKeys = Object.keys(sessionStorage)
+    existingKeys.forEach(key => {
+      if (key.startsWith('processed_code_') || key.startsWith('google_oauth_')) {
+        sessionStorage.removeItem(key)
+      }
+    })
+    localStorage.removeItem('google_oauth_state_backup')
+    localStorage.removeItem('google_oauth_state_data')
+    
     // Use Google OAuth directly instead of Supabase's OAuth
     const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
     googleAuthUrl.searchParams.set('client_id', import.meta.env.VITE_GOOGLE_CLIENT_ID || '')
@@ -55,7 +76,7 @@ export const authService = {
     googleAuthUrl.searchParams.set('response_type', 'code')
     googleAuthUrl.searchParams.set('scope', 'openid email profile')
     googleAuthUrl.searchParams.set('access_type', 'offline')
-    googleAuthUrl.searchParams.set('prompt', 'select_account')
+    googleAuthUrl.searchParams.set('prompt', 'consent select_account')
     googleAuthUrl.searchParams.set('state', state)
     
     console.log('Redirecting to Google OAuth:', googleAuthUrl.toString())
@@ -238,19 +259,28 @@ export const authService = {
   async processGoogleUser(email: string, fullName: string): Promise<UserWithCompany> {
     console.log('Step 3a: Checking if user exists in database...')
     
-    // Step 3a: Check if user exists in tender_users table
+    // Step 3a: Check if user exists in tender1_users table
+    console.log('Step 3a: Searching for user with email:', email)
     const { data: existingUser, error: fetchError } = await supabase
-      .from('tender_users')
+      .from('tender1_users')
       .select(`
         *,
-        tender_companies (
-          company_name
+        tender1_user_companies (
+          role,
+          is_active,
+          is_default,
+          tender1_companies (
+            company_name,
+            company_email
+          )
         )
       `)
       .eq('email', email)
       .single()
 
-    // If user exists in tender_users
+    console.log('Step 3a: User lookup result:', { existingUser, fetchError })
+
+    // If user exists in tender1_users
     if (existingUser && !fetchError) {
       console.log('Step 3a SUCCESS - User exists in database, logging in...')
       
@@ -259,26 +289,232 @@ export const authService = {
         throw new Error('Your account has been deactivated. Please contact support.')
       }
 
-      // User exists - LOGIN
-      const userData = {
-        ...existingUser,
-        company_name: existingUser.tender_companies?.company_name || ''
+      // Parse companies from the junction table relationship
+      const companies = (existingUser.tender1_user_companies || []).map((uc: any) => ({
+        company_id: uc.tender1_companies?.id || uc.company_id,
+        company_name: uc.tender1_companies?.company_name || '',
+        company_email: uc.tender1_companies?.company_email || '',
+        role: uc.role,
+        is_active: uc.is_active,
+        is_default: uc.is_default
+      }))
+
+      // Check for pending invitation from sessionStorage (for existing users)
+      const pendingInvitation = sessionStorage.getItem('pending_invitation')
+      let finalUserData = {
+        id: existingUser.id,
+        full_name: existingUser.full_name,
+        email: existingUser.email,
+        is_active: existingUser.is_active,
+        companies: companies,
+        selectedCompany: companies.find((c: any) => c.is_default) || companies[0] || null,
+        created_at: existingUser.created_at || '',
+        updated_at: existingUser.updated_at || '',
+        last_login: existingUser.last_login || ''
       } as any
       
-      console.log('Step 3a SUCCESS - User login completed:', userData)
-      return userData
+      if (pendingInvitation) {
+        try {
+          console.log('Step 3a: Processing pending invitation for existing user...')
+          const invitation = JSON.parse(pendingInvitation)
+          
+          // Verify email matches
+          if (existingUser.email.toLowerCase() === invitation.email.toLowerCase()) {
+            console.log('Step 3a: Email matches, adding user to company...')
+            
+            // Add user to company
+            const { error: addError } = await supabase.rpc(getFunctionName('add_user_to_company'), {
+              p_user_id: existingUser.id,
+              p_company_id: invitation.company_id,
+              p_role: invitation.role,
+              p_invited_by: invitation.invited_by
+            })
+            
+            if (addError) {
+              console.error('Step 3a: Failed to add user to company:', addError)
+            } else {
+              console.log('Step 3a: Successfully added user to company')
+              
+              // Mark invitation as accepted (only if not already accepted)
+              if (invitation.invitation_id && !invitation.already_accepted) {
+                console.log('Step 3a: Marking invitation as accepted:', invitation.invitation_id)
+                const { error: updateError } = await supabase
+                  .from('tender1_company_invitations')
+                  .update({
+                    accepted: true,
+                    accepted_at: new Date().toISOString()
+                  })
+                  .eq('id', invitation.invitation_id)
+                  .eq('accepted', false) // Only update if not already accepted
+                
+                if (updateError) {
+                  console.error('Step 3a: Failed to mark invitation as accepted:', updateError)
+                } else {
+                  console.log('Step 3a: Successfully marked invitation as accepted')
+                }
+              } else if (invitation.already_accepted) {
+                console.log('Step 3a: Invitation was already marked as accepted, skipping update')
+              }
+              
+              // Get updated user data with new company
+              console.log('Step 3a: Getting updated user data with new company...')
+              const { data: updatedUser, error: refreshError } = await supabase
+                .from('tender1_users')
+                .select(`
+                  *,
+                  tender1_user_companies (
+                    role,
+                    is_active,
+                    is_default,
+                    tender1_companies (
+                      company_name,
+                      company_email
+                    )
+                  )
+                `)
+                .eq('id', existingUser.id)
+                .single()
+              
+              console.log('Step 3a: Updated user query result:', { updatedUser, refreshError })
+              
+              if (updatedUser && !refreshError) {
+                const updatedCompanies = (updatedUser.tender1_user_companies || []).map((uc: any) => ({
+                  company_id: uc.tender1_companies?.id || uc.company_id,
+                  company_name: uc.tender1_companies?.company_name || '',
+                  company_email: uc.tender1_companies?.company_email || '',
+                  role: uc.role,
+                  is_active: uc.is_active,
+                  is_default: uc.is_default
+                }))
+                
+                console.log('Step 3a: Mapped companies:', updatedCompanies)
+                
+                finalUserData = {
+                  id: updatedUser.id,
+                  full_name: updatedUser.full_name,
+                  email: updatedUser.email,
+                  is_active: updatedUser.is_active,
+                  companies: updatedCompanies,
+                  selectedCompany: updatedCompanies.find((c: any) => c.is_default) || updatedCompanies[0] || null,
+                  created_at: updatedUser.created_at || '',
+                  updated_at: updatedUser.updated_at || '',
+                  last_login: updatedUser.last_login || ''
+                } as any
+                
+                console.log('Step 3a: Final user data with companies:', finalUserData)
+              } else {
+                console.error('Step 3a: Failed to get updated user data:', refreshError)
+              }
+              
+              // Clear pending invitation
+              sessionStorage.removeItem('pending_invitation')
+            }
+          } else {
+            console.log('Step 3a: Email mismatch, clearing pending invitation')
+            sessionStorage.removeItem('pending_invitation')
+          }
+        } catch (err) {
+          console.error('Step 3a: Failed to process pending invitation:', err)
+          sessionStorage.removeItem('pending_invitation')
+        }
+      }
+      
+      console.log('Step 3a SUCCESS - User login completed:', finalUserData)
+      return finalUserData
     }
 
-    // User doesn't exist in tender_users - SIGNUP (create new account)
+    // Handle case where user lookup failed but user might exist
+    if (fetchError && fetchError.code === 'PGRST116') {
+      console.log('Step 3a: User lookup returned no rows, but user might exist. Checking for duplicate email error...')
+      
+      // Try to find user without the junction table relationship
+      const { data: simpleUser, error: simpleError } = await supabase
+        .from('tender1_users')
+        .select('*')
+        .eq('email', email)
+        .single()
+      
+      if (simpleUser && !simpleError) {
+        console.log('Step 3a: Found user without junction table data, fetching companies separately...')
+        
+        // Get user's companies separately
+        const { data: userCompanies, error: companiesError } = await supabase.rpc(getFunctionName('get_user_companies'), {
+          p_user_id: simpleUser.id
+        })
+        
+        if (companiesError || !userCompanies) {
+          console.log('Step 3a: Failed to get user companies, proceeding with signup...')
+        } else {
+          // Parse companies
+          const companies = userCompanies.map((c: any) => ({
+            company_id: c.company_id,
+            company_name: c.company_name,
+            company_email: c.company_email,
+            role: c.role,
+            is_active: c.is_active,
+            is_default: c.is_default
+          }))
+
+          // Find default company
+          const selectedCompany = companies.find((c: any) => c.is_default) || companies[0] || null
+
+          // Return user data
+          const userData = {
+            id: simpleUser.id,
+            full_name: simpleUser.full_name,
+            email: simpleUser.email,
+            is_active: simpleUser.is_active,
+            companies: companies,
+            selectedCompany: selectedCompany,
+            created_at: simpleUser.created_at || '',
+            updated_at: simpleUser.updated_at || '',
+            last_login: simpleUser.last_login || ''
+          } as any
+          
+          console.log('Step 3a SUCCESS - User login completed via separate query:', userData)
+          return userData
+        }
+      }
+    }
+
+    // User doesn't exist in tender1_users - SIGNUP (create new account)
     console.log('Step 3b: User does not exist, creating new account...')
     
-    // Step 3b.1: Check if company already exists, if not create one
-    console.log('Step 3b.1: Checking if company exists...')
+    // Step 3b.0: Check if user has a pending invitation
+    console.log('Step 3b.0: Checking for pending invitations...')
+    const { data: pendingInvitation, error: invitationError } = await supabase
+      .from('tender1_company_invitations')
+      .select(`
+        *,
+        tender1_companies (
+          company_name,
+          company_email
+        )
+      `)
+      .eq('email', email)
+      .eq('accepted', false)
+      .gt('expires_at', new Date().toISOString())
+      .single()
+
     let companyData = null
+
+    if (pendingInvitation && !invitationError) {
+      console.log('Step 3b.0 SUCCESS - Found pending invitation:', pendingInvitation)
+      companyData = {
+        id: pendingInvitation.company_id,
+        company_name: pendingInvitation.tender1_companies?.company_name,
+        company_email: pendingInvitation.tender1_companies?.company_email
+      }
+      console.log('Step 3b.0 - Will add user to invited company:', companyData)
+    } else {
+      console.log('Step 3b.0 - No pending invitation found, will create new company')
+      
+      // Step 3b.1: Check if company already exists, if not create one
+      console.log('Step 3b.1: Checking if company exists...')
     
     // First, try to find existing company with same name
     const { data: existingCompany, error: companyFetchError } = await supabase
-      .from('tender_companies')
+      .from('tender1_companies')
       .select('*')
       .eq('company_name', fullName)
       .single()
@@ -286,19 +522,43 @@ export const authService = {
     if (existingCompany && !companyFetchError) {
       console.log('Step 3b.1 SUCCESS - Found existing company:', existingCompany)
       
-      // Check if user already exists in this company
+      // Check if user already exists in this company through junction table
       const { data: existingUserInCompany, error: userInCompanyError } = await supabase
-        .from('tender_users')
-        .select('*')
+        .from('tender1_user_companies')
+        .select(`
+          *,
+          tender1_users (*)
+        `)
         .eq('company_id', existingCompany.id)
-        .eq('email', email)
+        .eq('tender1_users.email', email)
         .single()
       
       if (existingUserInCompany && !userInCompanyError) {
         console.log('User already exists in this company, logging in...')
         const userData = {
-          ...existingUserInCompany,
-          company_name: existingCompany.company_name
+          id: existingUserInCompany.tender1_users.id,
+          full_name: existingUserInCompany.tender1_users.full_name,
+          email: existingUserInCompany.tender1_users.email,
+          is_active: existingUserInCompany.tender1_users.is_active,
+          companies: [{
+            company_id: existingCompany.id,
+            company_name: existingCompany.company_name,
+            company_email: existingCompany.company_email,
+            role: existingUserInCompany.role,
+            is_active: existingUserInCompany.is_active,
+            is_default: existingUserInCompany.is_default
+          }],
+          selectedCompany: {
+            company_id: existingCompany.id,
+            company_name: existingCompany.company_name,
+            company_email: existingCompany.company_email,
+            role: existingUserInCompany.role,
+            is_active: existingUserInCompany.is_active,
+            is_default: existingUserInCompany.is_default
+          },
+          created_at: existingUserInCompany.tender1_users.created_at || '',
+          updated_at: existingUserInCompany.tender1_users.updated_at || '',
+          last_login: existingUserInCompany.tender1_users.last_login || ''
         } as any
         return userData
       }
@@ -310,7 +570,7 @@ export const authService = {
       
       // Try to create company with original name first
       let { data: newCompanyData, error: companyError } = await supabase
-        .from('tender_companies')
+        .from('tender1_companies')
         .insert({
           company_name: fullName,
           company_email: email,
@@ -326,7 +586,7 @@ export const authService = {
         const uniqueCompanyName = `${fullName} (${emailPrefix})`
         
         const { data: retryCompanyData, error: retryError } = await supabase
-          .from('tender_companies')
+          .from('tender1_companies')
           .insert({
             company_name: uniqueCompanyName,
             company_email: email,
@@ -355,20 +615,19 @@ export const authService = {
       console.log('Step 3b.1 SUCCESS - Company created successfully:', newCompanyData)
       companyData = newCompanyData
     }
+    }
 
     // Wait a moment to ensure company is properly created
     await new Promise(resolve => setTimeout(resolve, 100))
 
-    // Step 3b.2: Create user in tender_users table
+    // Step 3b.2: Create user in tender1_users table (without company_id)
     console.log('Step 3b.2: Creating user...')
     const { data: newUser, error: userError } = await supabase
-      .from('tender_users')
+      .from('tender1_users')
       .insert({
-        company_id: companyData.id,
         full_name: fullName,
         email: email,
         password_hash: '', // No password for OAuth users
-        role: 'admin', // First user is admin
         is_active: true
       })
       .select()
@@ -376,19 +635,140 @@ export const authService = {
 
     if (userError) {
       console.error('Step 3b.2 FAILED - User creation failed:', userError)
+      
+      // Handle duplicate email error - user might have been created between our checks
+      if (userError.code === '23505' && userError.message.includes('email')) {
+        console.log('Step 3b.2: Duplicate email detected, user was created by another process. Attempting login...')
+        
+        // Try to find the existing user and log them in
+        const { data: existingUser, error: existingError } = await supabase
+          .from('tender1_users')
+          .select('*')
+          .eq('email', email)
+          .single()
+        
+        if (existingUser && !existingError) {
+          // Get user's companies
+          const { data: userCompanies, error: companiesError } = await supabase.rpc(getFunctionName('get_user_companies'), {
+            p_user_id: existingUser.id
+          })
+          
+          if (companiesError || !userCompanies) {
+            throw new Error('User exists but could not fetch company data')
+          }
+          
+          // Parse companies
+          const companies = userCompanies.map((c: any) => ({
+            company_id: c.company_id,
+            company_name: c.company_name,
+            company_email: c.company_email,
+            role: c.role,
+            is_active: c.is_active,
+            is_default: c.is_default
+          }))
+
+          // Find default company
+          const selectedCompany = companies.find((c: any) => c.is_default) || companies[0] || null
+
+          // Return user data
+          const userData = {
+            id: existingUser.id,
+            full_name: existingUser.full_name,
+            email: existingUser.email,
+            is_active: existingUser.is_active,
+            companies: companies,
+            selectedCompany: selectedCompany,
+            created_at: existingUser.created_at || '',
+            updated_at: existingUser.updated_at || '',
+            last_login: existingUser.last_login || ''
+          } as any
+          
+          console.log('Step 3b.2 SUCCESS - User login completed after duplicate email handling:', userData)
+          return userData
+        }
+      }
+      
       // Rollback: delete the company and sign out
       console.log('Rolling back: Deleting company...')
-      await supabase.from('tender_companies').delete().eq('id', companyData.id)
+      await supabase.from('tender1_companies').delete().eq('id', companyData.id)
       await supabase.auth.signOut()
       throw new Error(`User creation failed: ${userError.message}`)
     }
 
     console.log('Step 3b.2 SUCCESS - User created successfully:', newUser)
 
-    // Return new user data
+    // Step 3b.3: Add user to company through junction table
+    console.log('Step 3b.3: Adding user to company...')
+    
+    // Determine role and default status based on invitation or new company
+    const isFromInvitation = pendingInvitation && !invitationError
+    const userRole = isFromInvitation ? pendingInvitation.role : 'admin'
+    const isDefault = isFromInvitation ? false : true // Invited users don't get default company
+    
+    console.log('Step 3b.3 - User role and default:', { userRole, isDefault, isFromInvitation })
+    
+    const { data: userCompany, error: userCompanyError } = await supabase
+      .from('tender1_user_companies')
+      .insert({
+        user_id: newUser.id,
+        company_id: companyData.id,
+        role: userRole,
+        is_active: true,
+        is_default: isDefault
+      })
+      .select()
+      .single()
+
+    if (userCompanyError) {
+      console.error('Step 3b.3 FAILED - User-company association failed:', userCompanyError)
+      // Rollback: delete the user and company
+      console.log('Rolling back: Deleting user and company...')
+      await supabase.from('tender1_users').delete().eq('id', newUser.id)
+      await supabase.from('tender1_companies').delete().eq('id', companyData.id)
+      await supabase.auth.signOut()
+      throw new Error(`User-company association failed: ${userCompanyError.message}`)
+    }
+
+    console.log('Step 3b.3 SUCCESS - User added to company successfully:', userCompany)
+
+    // Step 3b.4: Mark invitation as accepted if it was from an invitation
+    if (isFromInvitation) {
+      console.log('Step 3b.4: Marking invitation as accepted...')
+      await supabase
+        .from('tender1_company_invitations')
+        .update({
+          accepted: true,
+          accepted_at: new Date().toISOString()
+        })
+        .eq('id', pendingInvitation.id)
+      console.log('Step 3b.4 SUCCESS - Invitation marked as accepted')
+    }
+
+    // Return new user data (multi-company format)
     const userData = {
-      ...newUser,
-      company_name: companyData.company_name
+      id: newUser.id,
+      full_name: newUser.full_name,
+      email: newUser.email,
+      is_active: newUser.is_active,
+      companies: [{
+        company_id: companyData.id,
+        company_name: companyData.company_name,
+        company_email: companyData.company_email,
+        role: userRole,
+        is_active: true,
+        is_default: isDefault
+      }],
+      selectedCompany: {
+        company_id: companyData.id,
+        company_name: companyData.company_name,
+        company_email: companyData.company_email,
+        role: userRole,
+        is_active: true,
+        is_default: isDefault
+      },
+      created_at: newUser.created_at || '',
+      updated_at: newUser.updated_at || '',
+      last_login: newUser.last_login || ''
     } as any
     
     console.log('Step 3b SUCCESS - New user signup completed:', userData)
@@ -420,7 +800,7 @@ export const authService = {
   async signup(formData: SignupFormData): Promise<UserWithCompany> {
     // First, create the company
     const { data: companyData, error: companyError } = await supabase
-      .from('tender_companies')
+      .from(getTableName('companies'))
       .insert({
         company_name: formData.company_name,
         company_email: formData.company_email,
@@ -437,17 +817,17 @@ export const authService = {
     }
 
     // Then create the user (first user is always admin)
-    const { data: userId, error: userError } = await supabase.rpc('tender_create_user', {
-      p_company_id: companyData.id,
+    const { data: userId, error: userError } = await supabase.rpc(getFunctionName('create_user'), {
       p_full_name: formData.full_name,
       p_email: formData.email,
       p_password: formData.password,
+      p_company_id: companyData.id,
       p_role: 'admin' // First user is always admin
     })
 
     if (userError) {
       // Rollback: delete the company
-      await supabase.from('tender_companies').delete().eq('id', companyData.id)
+      await supabase.from(getTableName('companies')).delete().eq('id', companyData.id)
       
       if (userError.message.includes('duplicate key')) {
         throw new Error('Email already exists')
@@ -455,40 +835,76 @@ export const authService = {
       throw new Error(userError.message || 'Failed to create user')
     }
 
-    // Return user data
-    return {
-      id: userId,
+    // Return user data with companies array
+    const companies = [{
       company_id: companyData.id,
       company_name: companyData.company_name,
-      full_name: formData.full_name,
-      email: formData.email,
+      company_email: companyData.company_email,
       role: 'admin',
       is_active: true,
+      is_default: true
+    }]
+
+    return {
+      id: userId,
+      full_name: formData.full_name,
+      email: formData.email,
+      is_active: true,
+      companies: companies,
+      selectedCompany: companies[0],
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      last_login: ''
     }
   },
 
   // Verify session (check if stored user is still valid)
   async verifySession(userId: string): Promise<UserWithCompany | null> {
+    console.log('verifySession called for userId:', userId)
+    
     const { data, error } = await supabase
-      .from('tender_users')
-      .select(`
-        *,
-        tender_companies (
-          company_name
-        )
-      `)
+      .from(getTableName('users'))
+      .select('*')
       .eq('id', userId)
       .eq('is_active', true)
       .single()
 
+    console.log('User verification result:', { data, error })
     if (error || !data) return null
 
-    return {
+    // Get user's companies
+    console.log('Getting user companies via RPC...')
+    const { data: userCompanies, error: companiesError } = await supabase.rpc(getFunctionName('get_user_companies'), {
+      p_user_id: userId
+    })
+
+    console.log('User companies RPC result:', { userCompanies, companiesError })
+    if (companiesError || !userCompanies) return null
+
+    // Parse companies
+    const companies = userCompanies.map((c: any) => ({
+      company_id: c.company_id,
+      company_name: c.company_name,
+      company_email: c.company_email,
+      role: c.role,
+      is_active: c.is_active,
+      is_default: c.is_default
+    }))
+
+    console.log('Parsed companies:', companies)
+
+    // Find default company
+    const selectedCompany = companies.find(c => c.is_default) || companies[0] || null
+    console.log('Selected company:', selectedCompany)
+
+    const result = {
       ...data,
-      company_name: data.tender_companies?.company_name || ''
+      companies: companies,
+      selectedCompany: selectedCompany
     } as any
+
+    console.log('verifySession returning:', result)
+    return result
   }
 }
 
