@@ -578,17 +578,19 @@ export default function Tenders() {
       if (aValue === null || aValue === undefined) aValue = ''
       if (bValue === null || bValue === undefined) bValue = ''
 
-      // Special handling for days_left (calculated field)
+      // Special handling for days_left (calculated field) - sort by last_date instead
       if (sortField === 'days_left') {
-        const aDaysLeft = getDaysLeft(a.last_date || null).days
-        const bDaysLeft = getDaysLeft(b.last_date || null).days
+        // Use last_date for sorting since days_left is calculated from last_date
+        aValue = a.last_date
+        bValue = b.last_date
         
-        // Null values (no date) go to end
-        if (aDaysLeft === null) return sortDirection === 'asc' ? 1 : -1
-        if (bDaysLeft === null) return sortDirection === 'asc' ? -1 : 1
+        // Handle null/undefined values for dates
+        if (!aValue) return sortDirection === 'asc' ? 1 : -1
+        if (!bValue) return sortDirection === 'asc' ? -1 : 1
         
-        aValue = aDaysLeft
-        bValue = bDaysLeft
+        // Convert to dates for comparison
+        aValue = new Date(aValue).getTime()
+        bValue = new Date(bValue).getTime()
       }
       // Special handling for dates
       else if (sortField === 'last_date' || sortField === 'created_at') {
@@ -656,12 +658,12 @@ export default function Tenders() {
     if (diffDays < 0) {
       return { 
         days: diffDays, 
-        badge: <Badge variant="red">Expired</Badge> 
+        badge: <Badge variant="red">{diffDays} days</Badge> 
       }
     } else if (diffDays === 0) {
       return { 
         days: 0, 
-        badge: <Badge variant="red">Today</Badge> 
+        badge: <Badge variant="red">0 days</Badge> 
       }
     } else if (diffDays === 1) {
       return { 
@@ -762,7 +764,7 @@ export default function Tenders() {
           required
         />
         <Select
-          label="Tender Type * (Method of selection as per RFP)"
+          label="Tender Type *"
           value={formData.tender_type}
           onChange={(e) => setFormData({ ...formData, tender_type: e.target.value })}
           options={[

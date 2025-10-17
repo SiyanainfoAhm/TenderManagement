@@ -253,10 +253,10 @@ export default function Dashboard() {
     }
   ]
 
-  // First 5 status cards (shown by default)
-  const firstRowStatusCards = statusCards.slice(0, 5)
-  // Remaining status cards (shown when expanded)
-  const secondRowStatusCards = statusCards.slice(5)
+  // First 5 main status cards (shown by default)
+  const defaultStatusCards = mainStatCards
+  // All additional status cards (shown when expanded)
+  const additionalStatusCards = statusCards
 
   const getDaysLeft = (lastDate: string) => {
     const today = new Date()
@@ -291,9 +291,9 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            {/* Main Stats Cards */}
+            {/* Default Status Cards (First 5) */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-              {mainStatCards.map((stat, index) => (
+              {defaultStatusCards.map((stat, index) => (
                 <div 
                   key={index} 
                   className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
@@ -311,52 +311,32 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Show Less Button */}
+            {/* Show All Status / Show Less Button */}
             <div className="flex justify-center mb-8">
               <button
                 onClick={() => setShowAllStatuses(!showAllStatuses)}
-                className="flex items-center px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                className="inline-flex items-center px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm"
               >
                 {showAllStatuses ? (
                   <>
-                    <i className="ri-arrow-up-s-line mr-1"></i>
+                    <i className="ri-arrow-up-s-line mr-2 text-base"></i>
                     Show Less
                   </>
                 ) : (
                   <>
-                    <i className="ri-arrow-down-s-line mr-1"></i>
-                    Show All
+                    <i className="ri-arrow-down-s-line mr-2 text-base"></i>
+                    Show All Status
                   </>
                 )}
               </button>
             </div>
 
-            {/* First Row Status Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
-              {firstRowStatusCards.map((status, index) => (
-                <div 
-                  key={index} 
-                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
-                >
-                  <div className="flex items-center">
-                    <div className={`w-12 h-12 ${status.bgColor} rounded-lg flex items-center justify-center`}>
-                      <i className={`${status.icon} ${status.iconColor} text-xl`}></i>
-                    </div>
-                    <div className="ml-4">
-                      <p className="text-sm font-medium text-gray-600">{status.label}</p>
-                      <p className="text-2xl font-bold text-gray-900">{status.value}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Second Row Status Cards (shown when expanded) */}
+            {/* Additional Status Cards (shown when expanded) */}
             {showAllStatuses && (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-                {secondRowStatusCards.map((status, index) => (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+                {additionalStatusCards.map((status, index) => (
                   <div 
-                    key={index + 5} 
+                    key={index} 
                     className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
                   >
                     <div className="flex items-center">
