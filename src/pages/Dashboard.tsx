@@ -22,11 +22,21 @@ export default function Dashboard() {
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([])
   const [showInvitationsModal, setShowInvitationsModal] = useState(false)
 
+  // Date range filter (default last 30 days)
+  const today = new Date()
+  const defaultEnd = today.toISOString().split('T')[0]
+  const d30 = new Date()
+  d30.setDate(today.getDate() - 30)
+  const defaultStart = d30.toISOString().split('T')[0]
+  const [startDate, setStartDate] = useState<string>(defaultStart)
+  const [endDate, setEndDate] = useState<string>(defaultEnd)
+  const [showDateFilter, setShowDateFilter] = useState(false)
+
 
   useEffect(() => {
     loadDashboardData()
     checkPendingInvitations()
-  }, [user, selectedCompany])
+  }, [user, selectedCompany, startDate, endDate])
 
   // Also check for pending invitations when selectedCompany changes
   useEffect(() => {
@@ -83,9 +93,10 @@ export default function Dashboard() {
     try {
       setLoading(true)
       const [statsData, deadlinesData, statusCountsData] = await Promise.all([
-        dashboardService.getCompanyStats(selectedCompany.company_id),
+        dashboardService.getCompanyStats(selectedCompany.company_id, startDate, endDate),
+        // Upcoming deadlines should always show next 7 days (not filtered by date range)
         tenderService.getUpcomingDeadlines(selectedCompany.company_id, 7),
-        tenderService.getStatusCounts(selectedCompany.company_id)
+        tenderService.getStatusCounts(selectedCompany.company_id, startDate, endDate)
       ])
 
       setStats(statsData)
@@ -277,13 +288,59 @@ export default function Dashboard() {
   return (
     <MainLayout>
       <div className="p-6">
-        {/* Header */}
+        {/* Header with Filter Icon */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">
-            Welcome back, {user?.full_name}! Here's what's happening with your tenders.
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+              <p className="text-gray-600 mt-1">
+                Welcome back, {user?.full_name}! Here's what's happening with your tenders.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDateFilter(!showDateFilter)}
+              className="inline-flex items-center px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm"
+            >
+              <i className="ri-filter-line mr-2 text-base"></i>
+              Filter
+            </button>
+          </div>
         </div>
+
+        {/* Date Range Filter */}
+        {showDateFilter && (
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-200 mb-6">
+            <div className="flex flex-col md:flex-row md:items-end gap-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full md:w-60 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full md:w-60 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="pt-6">
+                <button
+                  onClick={loadDashboardData}
+                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 shadow-sm"
+                >
+                  <i className="ri-refresh-line mr-2"></i>
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-12">

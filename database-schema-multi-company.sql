@@ -438,7 +438,7 @@ RETURNS TABLE (
 BEGIN
   RETURN QUERY
   SELECT 
-    COUNT(*) FILTER (WHERE status != 'not-bidding'),
+    COUNT(*),
     COUNT(*) FILTER (WHERE status = 'submitted'),
     COUNT(*) FILTER (WHERE status = 'not-bidding'),
     (SELECT COUNT(DISTINCT uc.user_id) 
@@ -446,7 +446,8 @@ BEGIN
      WHERE uc.company_id = p_company_id AND uc.is_active = true),
     COUNT(*) FILTER (WHERE last_date >= CURRENT_DATE AND last_date <= CURRENT_DATE + INTERVAL '7 days')
   FROM tender_tenders
-  WHERE company_id = p_company_id;
+  WHERE company_id = p_company_id
+    AND created_at >= CURRENT_DATE - INTERVAL '30 days';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

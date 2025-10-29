@@ -132,11 +132,37 @@ export const tenderService = {
   },
 
   // Get upcoming deadlines
-  async getUpcomingDeadlines(companyId: string, days: number = 7): Promise<TenderWithUser[]> {
-    const today = new Date().toISOString().split('T')[0]
-    const futureDate = new Date()
-    futureDate.setDate(futureDate.getDate() + days)
-    const futureDateStr = futureDate.toISOString().split('T')[0]
+  async getUpcomingDeadlines(
+    companyId: string,
+    daysOrStart?: number | string,
+    endDateStr?: string
+  ): Promise<TenderWithUser[]> {
+    // Resolve date range
+    let startDateStr: string
+    let endDateResolvedStr: string
+
+    if (typeof daysOrStart === 'number') {
+      const today = new Date().toISOString().split('T')[0]
+      const futureDate = new Date()
+      futureDate.setDate(futureDate.getDate() + daysOrStart)
+      const futureDateStr = futureDate.toISOString().split('T')[0]
+      startDateStr = today
+      endDateResolvedStr = futureDateStr
+    } else if (typeof daysOrStart === 'string' && typeof endDateStr === 'string') {
+      startDateStr = daysOrStart
+      endDateResolvedStr = endDateStr
+    } else {
+      // default: last 30 days from today inclusive
+      const end = new Date()
+      const start = new Date()
+      start.setDate(end.getDate() - 30)
+      startDateStr = start.toISOString().split('T')[0]
+      endDateResolvedStr = end.toISOString().split('T')[0]
+    }
+
+
+    // Only include active pipeline statuses in Upcoming Deadlines
+    const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation']
 
     const { data, error } = await supabase
       .from(getTableName('tenders'))
@@ -145,11 +171,24 @@ export const tenderService = {
         assigned_user:tender1_users!tender1_tenders_assigned_to_fkey(full_name)
       `)
       .eq('company_id', companyId)
-      .gte('last_date', today)
-      .lte('last_date', futureDateStr)
+      .in('status', activeStatuses)
+      .gte('last_date', startDateStr)
+      .lte('last_date', endDateResolvedStr)
       .order('last_date', { ascending: true })
 
-    if (error) throw new Error(error.message || 'Failed to fetch deadlines')
+    if (error) {
+      console.error('Upcoming deadlines error:', error)
+      throw new Error(error.message || 'Failed to fetch deadlines')
+    }
+
+    console.log('Upcoming deadlines query result:', {
+      companyId,
+      startDateStr,
+      endDateResolvedStr,
+      activeStatuses,
+      resultCount: data?.length || 0,
+      data: data?.map(t => ({ id: t.id, name: t.tender_name, status: t.status, last_date: t.last_date }))
+    })
 
     return (data || []).map(tender => ({
       ...tender,
@@ -158,11 +197,30 @@ export const tenderService = {
   },
 
   // Get status counts for dashboard
-  async getStatusCounts(companyId: string): Promise<Record<string, number>> {
-    const { data, error } = await supabase
+  async getStatusCounts(companyId: string, startDate?: string, endDate?: string): Promise<Record<string, number>> {
+    // Build date constraints
+    let sinceISO: string | undefined
+    let untilISO: string | undefined
+    if (startDate && endDate) {
+      sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
+      untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
+    } else {
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      sinceISO = thirtyDaysAgo.toISOString()
+    }
+
+    let query = supabase
       .from(getTableName('tenders'))
-      .select('status')
+      .select('status, created_at')
       .eq('company_id', companyId)
+      .gte('created_at', sinceISO as string)
+
+    if (untilISO) {
+      query = query.lte('created_at', untilISO)
+    }
+
+    const { data, error } = await query
 
     if (error) throw new Error(error.message || 'Failed to fetch status counts')
 

@@ -594,3 +594,6 @@ App accessible via Vercel URL
 
 The system handles authentication, multi-company access, invitations, tender management, and user management in a secure, scalable way.
 
+
+
+
