@@ -63,6 +63,9 @@ export interface Tender {
   tender_type?: string
   location?: string
   last_date?: string
+  expected_start_date?: string | null
+  expected_end_date?: string | null
+  expected_days?: number | null
   msme_exempted: boolean
   startup_exempted: boolean
   emd_amount: number
@@ -70,7 +73,23 @@ export interface Tender {
   tender_cost: number
   tender_notes?: string
   pq_criteria?: string
-  status: 'study' | 'pre-bid' | 'corrigendum' | 'not-bidding' | 'assigned' | 'submitted'
+  status:
+    | 'new'
+    | 'under-study'
+    | 'on-hold'
+    | 'will-bid'
+    | 'pre-bid'
+    | 'wait-for-corrigendum'
+    | 'not-bidding'
+    | 'assigned'
+    | 'in-preparation'
+    | 'ready-to-submit'
+    | 'submitted'
+    | 'under-evaluation'
+    | 'qualified'
+    | 'not-qualified'
+    | 'won'
+    | 'lost'
   assigned_to?: string
   not_bidding_reason?: string
   created_by?: string
@@ -144,6 +163,9 @@ export interface TenderFormData {
   tender_type?: string
   location?: string
   last_date?: string
+  expected_start_date?: string
+  expected_end_date?: string
+  expected_days?: string
   msme_exempted: boolean
   startup_exempted: boolean
   emd_amount: string

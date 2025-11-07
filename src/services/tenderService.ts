@@ -62,6 +62,11 @@ export const tenderService = {
       tender_type: formData.tender_type || null,
       location: formData.location || null,
       last_date: formData.last_date || null,
+      expected_start_date: formData.expected_start_date || null,
+      expected_end_date: formData.expected_end_date || null,
+      expected_days: formData.expected_days !== undefined && formData.expected_days !== null && formData.expected_days !== ''
+        ? (Number.isNaN(parseInt(formData.expected_days, 10)) ? null : parseInt(formData.expected_days, 10))
+        : null,
       msme_exempted: formData.msme_exempted,
       startup_exempted: formData.startup_exempted,
       emd_amount: parseFloat(formData.emd_amount) || 0,
@@ -97,6 +102,11 @@ export const tenderService = {
       tender_type: formData.tender_type || null,
       location: formData.location || null,
       last_date: formData.last_date || null,
+      expected_start_date: formData.expected_start_date || null,
+      expected_end_date: formData.expected_end_date || null,
+      expected_days: formData.expected_days !== undefined && formData.expected_days !== null && formData.expected_days !== ''
+        ? (Number.isNaN(parseInt(formData.expected_days, 10)) ? null : parseInt(formData.expected_days, 10))
+        : null,
       msme_exempted: formData.msme_exempted,
       startup_exempted: formData.startup_exempted,
       emd_amount: parseFloat(formData.emd_amount) || 0,
@@ -162,7 +172,7 @@ export const tenderService = {
 
 
     // Only include active pipeline statuses in Upcoming Deadlines
-    const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation']
+    const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation', 'ready-to-submit']
 
     const { data, error } = await supabase
       .from(getTableName('tenders'))

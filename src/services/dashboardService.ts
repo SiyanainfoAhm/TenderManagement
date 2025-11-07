@@ -71,7 +71,7 @@ export const dashboardService = {
       .eq('is_active', true)
 
     // Upcoming deadlines within selected date range (last_date between range and active statuses)
-    const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation']
+    const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation', 'ready-to-submit']
     const upcomingQuery = supabase
       .from(getTableName('tenders'))
       .select('id', { count: 'exact', head: true })

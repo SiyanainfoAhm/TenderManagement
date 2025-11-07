@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { tenderService } from '@/services/tenderService'
 import { userService } from '@/services/userService'
@@ -15,6 +16,8 @@ import Badge from '@/components/base/Badge'
 
 export default function Tenders() {
   const { user, selectedCompany } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [tenders, setTenders] = useState<TenderWithUser[]>([])
   const [users, setUsers] = useState<CompanyMember[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +58,12 @@ export default function Tenders() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 25
 
+  // Pending tender ID to auto-open via query param
+  const [pendingViewId, setPendingViewId] = useState<string | null>(null)
+  const [viewAttachments, setViewAttachments] = useState<any[]>([])
+  const [viewAttachmentsLoading, setViewAttachmentsLoading] = useState(false)
+  const [viewAttachmentsError, setViewAttachmentsError] = useState<string | null>(null)
+
   // Form data
   const [formData, setFormData] = useState<TenderFormData>({
     tender247_id: '',
@@ -62,8 +71,12 @@ export default function Tenders() {
     portal_link: '',
     tender_name: '',
     source: '',
+    tender_type: '',
     location: '',
     last_date: '',
+    expected_start_date: '',
+    expected_end_date: '',
+    expected_days: '',
     msme_exempted: false,
     startup_exempted: false,
     emd_amount: '',
@@ -78,6 +91,17 @@ export default function Tenders() {
   useEffect(() => {
     loadData()
   }, [user, selectedCompany])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const viewId = params.get('view')
+
+    if (viewId && viewId !== pendingViewId) {
+      setPendingViewId(viewId)
+    } else if (!viewId && pendingViewId) {
+      setPendingViewId(null)
+    }
+  }, [location.search, pendingViewId])
 
   // Handle click outside and keyboard to close status dropdown
   useEffect(() => {
@@ -138,6 +162,9 @@ export default function Tenders() {
       tender_type: '',
       location: '',
       last_date: '',
+      expected_start_date: '',
+      expected_end_date: '',
+      expected_days: '',
       msme_exempted: false,
       startup_exempted: false,
       emd_amount: '',
@@ -162,7 +189,38 @@ export default function Tenders() {
   const handleView = (tender: TenderWithUser) => {
     setSelectedTender(tender)
     setIsViewModalOpen(true)
+    setViewAttachments([])
+    setViewAttachmentsError(null)
+    setViewAttachmentsLoading(true)
+
+    tenderService
+      .getTenderAttachments(tender.id)
+      .then((attachments) => {
+        setViewAttachments(attachments)
+      })
+      .catch((error: any) => {
+        console.error('Failed to load attachments for view:', error)
+        setViewAttachmentsError('Unable to load attachments for this tender.')
+      })
+      .finally(() => {
+        setViewAttachmentsLoading(false)
+      })
   }
+
+  useEffect(() => {
+    if (!pendingViewId || tenders.length === 0) return
+
+    const tenderToView = tenders.find((t) => t.id === pendingViewId)
+    if (!tenderToView) return
+
+    handleView(tenderToView)
+    setPendingViewId(null)
+
+    const params = new URLSearchParams(location.search)
+    params.delete('view')
+    const search = params.toString()
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true })
+  }, [pendingViewId, tenders, navigate, location])
 
   const handleEdit = async (tender: TenderWithUser) => {
     setSelectedTender(tender)
@@ -175,6 +233,9 @@ export default function Tenders() {
       tender_type: tender.tender_type || '',
       location: tender.location || '',
       last_date: tender.last_date || '',
+      expected_start_date: tender.expected_start_date || '',
+      expected_end_date: tender.expected_end_date || '',
+      expected_days: tender.expected_days !== null && tender.expected_days !== undefined ? tender.expected_days.toString() : '',
       msme_exempted: tender.msme_exempted,
       startup_exempted: tender.startup_exempted,
       emd_amount: tender.emd_amount.toString(),
@@ -276,7 +337,7 @@ export default function Tenders() {
   const handleFiles = (files: File[]) => {
     const validFiles = files.filter(file => {
       const maxSize = 10 * 1024 * 1024 // 10MB
-      const validTypes = [
+      const validMimeTypes = [
         'application/pdf',
         'application/msword',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -288,19 +349,27 @@ export default function Tenders() {
         'image/png',
         'image/gif',
         'application/zip',
+        'application/x-zip',
+        'application/x-zip-compressed',
         'application/x-rar-compressed'
       ]
-      
+      const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'zip', 'rar']
+      const fileExtension = file.name.split('.').pop()?.toLowerCase() || ''
+      const fileType = file.type.toLowerCase()
+
       if (file.size > maxSize) {
         alert(`File ${file.name} is too large. Maximum size is 10MB.`)
         return false
       }
-      
-      if (!validTypes.includes(file.type)) {
+
+      const isMimeValid = fileType ? validMimeTypes.includes(fileType) : false
+      const isExtensionAllowed = allowedExtensions.includes(fileExtension)
+
+      if (!isMimeValid && !isExtensionAllowed) {
         alert(`File ${file.name} has an unsupported format.`)
         return false
       }
-      
+
       return true
     })
     
@@ -320,13 +389,16 @@ export default function Tenders() {
   }
 
   const getFileIcon = (file: File | any) => {
-    const fileType = file.type || file.file_type
+    const fileType = (file.type || file.file_type || '').toLowerCase()
+    const fileName = (file.name || file.file_name || '').toLowerCase()
+    const extension = fileName.split('.').pop() || ''
+
     if (fileType.startsWith('image/')) return 'ri-image-line'
     if (fileType === 'application/pdf') return 'ri-file-pdf-line'
     if (fileType.includes('word')) return 'ri-file-word-line'
     if (fileType.includes('excel') || fileType.includes('spreadsheet')) return 'ri-file-excel-line'
     if (fileType.includes('powerpoint') || fileType.includes('presentation')) return 'ri-file-ppt-line'
-    if (fileType.includes('zip') || fileType.includes('rar')) return 'ri-file-zip-line'
+    if (fileType.includes('zip') || fileType.includes('rar') || extension === 'zip' || extension === 'rar') return 'ri-file-zip-line'
     return 'ri-file-line'
   }
 
@@ -629,6 +701,7 @@ export default function Tenders() {
       'not-bidding': { variant: 'red' as const, label: 'Not Bidding' },
       'assigned': { variant: 'purple' as const, label: 'Assigned' },
       'in-preparation': { variant: 'blue' as const, label: 'In Preparation' },
+      'ready-to-submit': { variant: 'blue' as const, label: 'Ready to Submit' },
       'submitted': { variant: 'green' as const, label: 'Submitted' },
       'under-evaluation': { variant: 'orange' as const, label: 'Under Evaluation' },
       'qualified': { variant: 'green' as const, label: 'Qualified' },
@@ -642,6 +715,13 @@ export default function Tenders() {
 
   const formatCurrency = (amount: number) => {
     return amount > 0 ? `₹${amount.toLocaleString('en-IN')}` : 'N/A'
+  }
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return 'N/A'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return 'N/A'
+    return date.toLocaleString()
   }
 
   const getDaysLeft = (lastDate: string | null) => {
@@ -704,6 +784,7 @@ export default function Tenders() {
     { value: 'not-bidding', label: 'Not Bidding' },
     { value: 'assigned', label: 'Assigned' },
     { value: 'in-preparation', label: 'In Preparation' },
+    { value: 'ready-to-submit', label: 'Ready to Submit' },
     { value: 'submitted', label: 'Submitted' },
     { value: 'under-evaluation', label: 'Under Evaluation' },
     { value: 'qualified', label: 'Qualified' },
@@ -791,6 +872,30 @@ export default function Tenders() {
         value={formData.last_date}
         onChange={(e) => setFormData({ ...formData, last_date: e.target.value })}
       />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Input
+          label="Expected Start Date"
+          type="date"
+          value={formData.expected_start_date}
+          onChange={(e) => setFormData({ ...formData, expected_start_date: e.target.value })}
+        />
+        <Input
+          label="Expected End Date"
+          type="date"
+          value={formData.expected_end_date}
+          onChange={(e) => setFormData({ ...formData, expected_end_date: e.target.value })}
+          min={formData.expected_start_date || undefined}
+        />
+        <Input
+          label="Expected Days"
+          type="number"
+          value={formData.expected_days}
+          onChange={(e) => setFormData({ ...formData, expected_days: e.target.value })}
+          placeholder="0"
+          min={0}
+        />
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <label className="flex items-center space-x-2">
@@ -1131,6 +1236,7 @@ export default function Tenders() {
                     <SortableHeader field="location" label="Location" />
                     <SortableHeader field="last_date" label="Last Date" />
                     <SortableHeader field="days_left" label="Days Left" />
+                    <SortableHeader field="tender_cost" label="Tender Amount" />
                     <SortableHeader field="emd_amount" label="EMD Amount" />
                     <SortableHeader field="status" label="Status" />
                     <SortableHeader field="assigned_to" label="Assigned To" />
@@ -1140,7 +1246,7 @@ export default function Tenders() {
                 <tbody className="divide-y divide-gray-200">
                   {currentTenders.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="px-6 py-12 text-center">
+                      <td colSpan={11} className="px-6 py-12 text-center">
                         <i className="ri-inbox-line text-4xl text-gray-400 mb-2"></i>
                         <p className="text-gray-500">No tenders found</p>
                       </td>
@@ -1163,6 +1269,7 @@ export default function Tenders() {
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.location || 'N/A'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.last_date || 'N/A'}</td>
                         <td className="px-6 py-4">{getDaysLeft(tender.last_date || null).badge}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.tender_cost)}</td>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.emd_amount)}</td>
                         <td className="px-6 py-4">
                           {editingStatusId === tender.id ? (
@@ -1311,10 +1418,31 @@ export default function Tenders() {
         </Modal>
 
         {/* View Modal */}
-        <Modal isOpen={isViewModalOpen} onClose={() => setIsViewModalOpen(false)} title="Tender Details" size="lg">
+        <Modal
+          isOpen={isViewModalOpen}
+          onClose={() => {
+            setIsViewModalOpen(false)
+            setSelectedTender(null)
+            setViewAttachments([])
+            setViewAttachmentsError(null)
+          }}
+          title="Tender Details"
+          size="lg"
+        >
           {selectedTender && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Tender Name</label>
+                  <p className="text-base text-gray-900 mt-1 font-semibold">{selectedTender.tender_name}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Status</label>
+                  <div className="mt-1">{getStatusBadge(selectedTender.status)}</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Tender247 ID</label>
                   <p className="text-sm text-gray-900 mt-1">{selectedTender.tender247_id || 'N/A'}</p>
@@ -1324,31 +1452,103 @@ export default function Tenders() {
                   <p className="text-sm text-gray-900 mt-1">{selectedTender.gem_eprocure_id || 'N/A'}</p>
                 </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">Tender Name</label>
-                <p className="text-sm text-gray-900 mt-1">{selectedTender.tender_name}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Source</label>
                   <p className="text-sm text-gray-900 mt-1">{selectedTender.source || 'N/A'}</p>
                 </div>
                 <div>
+                  <label className="text-sm font-medium text-gray-700">Tender Type</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.tender_type || 'N/A'}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
                   <label className="text-sm font-medium text-gray-700">Location</label>
                   <p className="text-sm text-gray-900 mt-1">{selectedTender.location || 'N/A'}</p>
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Portal Link</label>
+                  {selectedTender.portal_link ? (
+                    <a
+                      href={selectedTender.portal_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 mt-1 inline-flex items-center gap-1"
+                    >
+                      Visit Portal
+                      <i className="ri-external-link-line text-xs"></i>
+                    </a>
+                  ) : (
+                    <p className="text-sm text-gray-900 mt-1">N/A</p>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Last Date</label>
                   <p className="text-sm text-gray-900 mt-1">{selectedTender.last_date || 'N/A'}</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700">Status</label>
-                  <div className="mt-1">{getStatusBadge(selectedTender.status)}</div>
+                  <label className="text-sm font-medium text-gray-700">Assigned To</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.assigned_user_name || 'Unassigned'}</p>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Expected Start Date</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.expected_start_date || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Expected End Date</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.expected_end_date || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Expected Days</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.expected_days !== null && selectedTender.expected_days !== undefined ? selectedTender.expected_days : 'N/A'}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Created By</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.created_user_name || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Created At</label>
+                  <p className="text-sm text-gray-900 mt-1">{formatDateTime(selectedTender.created_at)}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Updated At</label>
+                  <p className="text-sm text-gray-900 mt-1">{formatDateTime(selectedTender.updated_at)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">MSME Exempted</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.msme_exempted ? 'Yes' : 'No'}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Startup Exempted</label>
+                  <p className="text-sm text-gray-900 mt-1">{selectedTender.startup_exempted ? 'Yes' : 'No'}</p>
+                </div>
+                {selectedTender.not_bidding_reason && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Not Bidding Reason</label>
+                    <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap">{selectedTender.not_bidding_reason}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700">EMD Amount</label>
                   <p className="text-sm text-gray-900 mt-1">{formatCurrency(selectedTender.emd_amount)}</p>
@@ -1362,16 +1562,72 @@ export default function Tenders() {
                   <p className="text-sm text-gray-900 mt-1">{formatCurrency(selectedTender.tender_cost)}</p>
                 </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">Assigned To</label>
-                <p className="text-sm text-gray-900 mt-1">{selectedTender.assigned_user_name || 'Unassigned'}</p>
-              </div>
+
+              {selectedTender.pq_criteria && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700">PQ Criteria</label>
+                  <ul className="list-disc list-inside text-sm text-gray-900 mt-1 space-y-1">
+                    {selectedTender.pq_criteria
+                      .split('\n')
+                      .map((item, index) => item.trim())
+                      .filter(Boolean)
+                      .map((item, index) => (
+                        <li key={index}>{item}</li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+
               {selectedTender.tender_notes && (
                 <div>
                   <label className="text-sm font-medium text-gray-700">Notes</label>
-                  <p className="text-sm text-gray-900 mt-1">{selectedTender.tender_notes}</p>
+                  <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap">{selectedTender.tender_notes}</p>
                 </div>
               )}
+
+              <div>
+                <label className="text-sm font-medium text-gray-700">Attachments</label>
+                <div className="mt-2 space-y-2">
+                  {viewAttachmentsLoading && (
+                    <div className="flex items-center text-sm text-gray-500">
+                      <i className="ri-loader-4-line animate-spin text-lg text-blue-500 mr-2"></i>
+                      Loading attachments...
+                    </div>
+                  )}
+
+                  {viewAttachmentsError && (
+                    <p className="text-sm text-red-600">{viewAttachmentsError}</p>
+                  )}
+
+                  {!viewAttachmentsLoading && !viewAttachmentsError && viewAttachments.length === 0 && (
+                    <p className="text-sm text-gray-500">No attachments uploaded.</p>
+                  )}
+
+                  {viewAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <i className={`${getFileIcon(attachment)} text-lg text-blue-500`}></i>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{attachment.file_name}</p>
+                          <p className="text-xs text-gray-500">
+                            {formatFileSize(attachment.file_size)} • {formatDateTime(attachment.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDownloadExistingAttachment(attachment)}
+                        className="text-blue-500 hover:text-blue-600"
+                        title="Download"
+                      >
+                        <i className="ri-download-line text-lg"></i>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </Modal>
