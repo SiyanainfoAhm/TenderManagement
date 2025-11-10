@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard'
 import Tenders from './pages/Tenders'
 import Users from './pages/Users'
 import NotFound from './pages/NotFound'
+import BidFeesPage from './pages/bid-fees/page'
+import TaskTimelinePage from './pages/task-timeline/page'
 
 function App() {
   return (
@@ -29,6 +31,18 @@ function App() {
           <Route path="/tenders" element={
             <ProtectedRoute>
               <Tenders />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/task-timeline" element={
+            <ProtectedRoute>
+              <TaskTimelinePage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/bid-fees" element={
+            <ProtectedRoute requireAdmin>
+              <BidFeesPage />
             </ProtectedRoute>
           } />
           

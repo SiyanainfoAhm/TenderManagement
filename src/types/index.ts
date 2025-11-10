@@ -103,6 +103,122 @@ export interface TenderWithUser extends Tender {
   created_user_name?: string
 }
 
+// Bid Fee Types
+export type BidFeeType =
+  | 'tender-fees'
+  | 'emd'
+  | 'processing-fees'
+  | 'performance-guarantee'
+  | 'other'
+
+export type BidFeePaymentMode =
+  | 'NEFT/RTGS'
+  | 'Net-Banking/UPI'
+  | 'DD / Banker\'s Cheque'
+  | 'FDR'
+  | 'Bank Guarantee / e-BG'
+  | 'Cash'
+  | 'Other'
+
+export type BidFeeStatus =
+  | 'pending'
+  | 'submitted'
+  | 'paid'
+  | 'refunded'
+  | 'released'
+  | 'expired'
+
+export interface BidFeeAttachment {
+  id: string
+  bid_fee_id: string
+  file_name: string
+  file_size: number
+  file_type: string
+  file_path: string
+  file_url: string
+  uploaded_by: string
+  created_at: string
+}
+
+export interface BidFee {
+  id: string
+  company_id: string
+  tender_id: string
+  tender_reference?: string | null
+  tender_name_snapshot?: string | null
+  fee_type: BidFeeType
+  payment_mode: BidFeePaymentMode
+  amount: number
+  refundable: boolean
+  status: BidFeeStatus
+  due_date?: string | null
+  notes?: string | null
+  utr_no?: string | null
+  bank_name?: string | null
+  ifsc?: string | null
+  txn_date?: string | null
+  gateway_ref?: string | null
+  dd_no?: string | null
+  payable_at?: string | null
+  issue_date?: string | null
+  expiry_date?: string | null
+  maturity_date?: string | null
+  issuing_bank?: string | null
+  bg_no?: string | null
+  bg_amount?: number | null
+  claim_period?: string | null
+  urn_ref?: string | null
+  fdr_no?: string | null
+  bank?: string | null
+  lien_marked?: boolean | null
+  receipt_no?: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  tender?: Pick<Tender, 'tender_name' | 'tender247_id' | 'gem_eprocure_id'>
+  attachments?: BidFeeAttachment[]
+}
+
+export interface BidFeeFormEntry {
+  fee_type: BidFeeType
+  payment_mode: BidFeePaymentMode
+  amount: number
+  refundable: boolean
+  status: BidFeeStatus
+  due_date?: string | null
+  notes?: string | null
+  utr_no?: string | null
+  bank_name?: string | null
+  ifsc?: string | null
+  txn_date?: string | null
+  gateway_ref?: string | null
+  dd_no?: string | null
+  payable_at?: string | null
+  issue_date?: string | null
+  expiry_date?: string | null
+  maturity_date?: string | null
+  issuing_bank?: string | null
+  bg_no?: string | null
+  bg_amount?: number | null
+  claim_period?: string | null
+  urn_ref?: string | null
+  fdr_no?: string | null
+  bank?: string | null
+  lien_marked?: boolean | null
+  receipt_no?: string | null
+  attachments?: File[]
+}
+
+export interface BidFeeFilters {
+  search?: string
+  fee_types?: BidFeeType[]
+  status?: BidFeeStatus
+  payment_mode?: BidFeePaymentMode
+  start_date?: string
+  end_date?: string
+  tender_id?: string
+}
+
 // Tender History Types
 export interface TenderHistory {
   id: string

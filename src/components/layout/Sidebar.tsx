@@ -7,28 +7,40 @@ export default function Sidebar() {
   const { selectedCompany, logout } = useAuth()
 
   const menuItems = [
-    { 
-      path: '/dashboard', 
-      icon: 'ri-dashboard-line', 
-      label: 'Dashboard', 
-      roles: ['admin', 'user', 'viewer'] 
+    {
+      path: '/dashboard',
+      icon: 'ri-dashboard-line',
+      label: 'Dashboard',
+      roles: ['admin', 'user', 'viewer']
     },
-    { 
-      path: '/tenders', 
-      icon: 'ri-file-list-3-line', 
-      label: 'Tenders', 
-      roles: ['admin', 'user'] 
+    {
+      path: '/tenders',
+      icon: 'ri-file-list-3-line',
+      label: 'Tenders',
+      roles: ['admin', 'user']
     },
-    { 
-      path: '/users', 
-      icon: 'ri-team-line', 
-      label: 'Users', 
-      roles: ['admin'] 
+    {
+      path: '/task-timeline',
+      icon: 'ri-time-line',
+      label: 'Task Timeline',
+      roles: ['admin', 'user']
     },
+    {
+      path: '/bid-fees',
+      icon: 'ri-money-dollar-circle-line',
+      label: 'Bid Fees',
+      roles: ['admin']
+    },
+    {
+      path: '/users',
+      icon: 'ri-team-line',
+      label: 'Users',
+      roles: ['admin']
+    }
   ]
 
   // Filter menu items based on user's role in the selected company
-  const filteredMenuItems = menuItems.filter(item => 
+  const filteredMenuItems = menuItems.filter(item =>
     item.roles.includes(selectedCompany?.role || 'viewer')
   )
 

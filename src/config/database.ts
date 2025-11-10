@@ -10,6 +10,8 @@ export const TABLES = {
   tender_history: `${DB_PREFIX}tender_history`,
   company_invitations: `${DB_PREFIX}company_invitations`,
   tender_attachments: `${DB_PREFIX}tender_attachments`,
+  bid_fees: `${DB_PREFIX}bid_fees`,
+  bid_fee_attachments: `${DB_PREFIX}bid_fee_attachments`,
 }
 
 // Function names with prefix
