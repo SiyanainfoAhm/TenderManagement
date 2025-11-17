@@ -1,9 +1,67 @@
 import { supabase } from '@/lib/supabase'
 import { Tender, TenderWithUser, TenderFormData } from '@/types'
 import { getTableName } from '@/config/database'
+import { bidFeeService } from './bidFeeService'
+
+// Helper function to sync tender amounts to bid fees
+async function syncTenderAmountsToBidFees(
+  tenderId: string,
+  companyId: string,
+  tenderFees: number,
+  emdAmount: number,
+  tender: Pick<Tender, 'tender_name' | 'tender247_id' | 'gem_eprocure_id'>,
+  userId: string
+): Promise<void> {
+  const BID_FEE_TABLE = getTableName('bid_fees')
+  const tenderReference = tender.tender247_id || tender.gem_eprocure_id || tender.tender_name
+
+  // Sync Tender Fees
+  const tenderFeesBidFeeId = await bidFeeService.getOrCreateBidFee(
+    tenderId,
+    'tender-fees',
+    companyId,
+    tender,
+    userId
+  )
+
+  const { error: updateTenderFeesError } = await supabase
+    .from(BID_FEE_TABLE)
+    .update({
+      amount: tenderFees,
+      tender_reference: tenderReference,
+      tender_name_snapshot: tender.tender_name
+    })
+    .eq('id', tenderFeesBidFeeId)
+
+  if (updateTenderFeesError) {
+    throw new Error(updateTenderFeesError.message || 'Failed to sync tender fees to bid fees')
+  }
+
+  // Sync EMD Amount
+  const emdBidFeeId = await bidFeeService.getOrCreateBidFee(
+    tenderId,
+    'emd',
+    companyId,
+    tender,
+    userId
+  )
+
+  const { error: updateEmdError } = await supabase
+    .from(BID_FEE_TABLE)
+    .update({
+      amount: emdAmount,
+      tender_reference: tenderReference,
+      tender_name_snapshot: tender.tender_name
+    })
+    .eq('id', emdBidFeeId)
+
+  if (updateEmdError) {
+    throw new Error(updateEmdError.message || 'Failed to sync EMD amount to bid fees')
+  }
+}
 
 export const tenderService = {
-  // Get all tenders for a company
+  // Get all tenders for a company (NO date filtering - shows ALL tenders)
   async getTenders(companyId: string): Promise<TenderWithUser[]> {
     const { data, error } = await supabase
       .from(getTableName('tenders'))
@@ -16,6 +74,41 @@ export const tenderService = {
       .order('created_at', { ascending: false })
 
     if (error) throw new Error(error.message || 'Failed to fetch tenders')
+
+    return (data || []).map(tender => ({
+      ...tender,
+      assigned_user_name: tender.assigned_user?.full_name,
+      created_user_name: tender.created_user?.full_name
+    }))
+  },
+
+  // Get tenders for timeline (with date filtering - only tenders with expected_start_date and expected_end_date)
+  async getTendersForTimeline(companyId: string, filters?: { startDate?: string; endDate?: string }): Promise<TenderWithUser[]> {
+    let query = supabase
+      .from(getTableName('tenders'))
+      .select(`
+        *,
+        assigned_user:tender1_users!tender1_tenders_assigned_to_fkey(full_name),
+        created_user:tender1_users!tender1_tenders_created_by_fkey(full_name)
+      `)
+      .eq('company_id', companyId)
+      .not('expected_start_date', 'is', null)
+      .not('expected_end_date', 'is', null)
+
+    // Apply date range filter if provided
+    if (filters?.startDate && filters?.endDate) {
+      // Filter tenders where date range overlaps with the filter range
+      // Tender matches if: tenderStart <= filterEnd AND tenderEnd >= filterStart
+      query = query
+        .lte('expected_start_date', filters.endDate)
+        .gte('expected_end_date', filters.startDate)
+    }
+
+    query = query.order('created_at', { ascending: false })
+
+    const { data, error } = await query
+
+    if (error) throw new Error(error.message || 'Failed to fetch tenders for timeline')
 
     return (data || []).map(tender => ({
       ...tender,
@@ -43,6 +136,73 @@ export const tenderService = {
       assigned_user_name: data.assigned_user?.full_name,
       created_user_name: data.created_user?.full_name
     }
+  },
+
+  // Check if Tender247 ID or GEM/Eprocure ID already exists (case-insensitive)
+  async checkDuplicateIds(
+    companyId: string,
+    tender247Id: string | undefined,
+    gemEprocureId: string | undefined,
+    excludeTenderId?: string
+  ): Promise<{ isDuplicate: boolean; message: string }> {
+    const messages: string[] = []
+
+    // Fetch all tenders for the company to do case-insensitive comparison
+    let query = supabase
+      .from(getTableName('tenders'))
+      .select('id, tender247_id, gem_eprocure_id')
+      .eq('company_id', companyId)
+
+    if (excludeTenderId) {
+      query = query.neq('id', excludeTenderId)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      throw new Error(error.message || 'Failed to check for duplicate IDs')
+    }
+
+    if (!data || data.length === 0) {
+      return { isDuplicate: false, message: '' }
+    }
+
+    // Normalize input IDs to lowercase for comparison
+    const normalizedTender247Id = tender247Id?.trim().toLowerCase()
+    const normalizedGemEprocureId = gemEprocureId?.trim().toLowerCase()
+
+    // Check Tender247 ID (case-insensitive)
+    if (normalizedTender247Id) {
+      const duplicate = data.find(
+        (tender) => tender.tender247_id && 
+        tender.tender247_id.toLowerCase() === normalizedTender247Id
+      )
+      
+      if (duplicate) {
+        messages.push(`Tender247 ID "${tender247Id.trim()}" already exists`)
+      }
+    }
+
+    // Check GEM/Eprocure ID (case-insensitive)
+    if (normalizedGemEprocureId) {
+      const duplicate = data.find(
+        (tender) => tender.gem_eprocure_id && 
+        tender.gem_eprocure_id.toLowerCase() === normalizedGemEprocureId
+      )
+      
+      if (duplicate) {
+        messages.push(`GEM/Eprocure ID "${gemEprocureId.trim()}" already exists`)
+      }
+    }
+
+    if (messages.length > 0) {
+      return {
+        isDuplicate: true,
+        message: messages.join(' and ')
+      }
+    }
+
+    return { isDuplicate: false, message: '' }
   },
 
   // Create new tender
@@ -88,6 +248,25 @@ export const tenderService = {
 
     if (error) throw new Error(error.message || 'Failed to create tender')
 
+    // Sync tender fees and EMD to bid fees
+    try {
+      await syncTenderAmountsToBidFees(
+        data.id,
+        companyId,
+        parseFloat(formData.tender_fees) || 0,
+        parseFloat(formData.emd_amount) || 0,
+        {
+          tender_name: formData.tender_name,
+          tender247_id: formData.tender247_id,
+          gem_eprocure_id: formData.gem_eprocure_id
+        },
+        userId
+      )
+    } catch (syncError: any) {
+      console.error('Failed to sync tender amounts to bid fees:', syncError)
+      // Don't throw - tender is created, sync failure is logged
+    }
+
     return data
   },
 
@@ -119,6 +298,15 @@ export const tenderService = {
       not_bidding_reason: formData.not_bidding_reason || null
     }
 
+    // Get tender info for sync
+    const { data: existingTender, error: fetchError } = await supabase
+      .from(getTableName('tenders'))
+      .select('company_id, created_by')
+      .eq('id', tenderId)
+      .single()
+
+    if (fetchError) throw new Error(fetchError.message || 'Failed to fetch tender for update')
+
     const { data, error } = await supabase
       .from(getTableName('tenders'))
       .update(tenderData)
@@ -127,6 +315,25 @@ export const tenderService = {
       .single()
 
     if (error) throw new Error(error.message || 'Failed to update tender')
+
+    // Sync tender fees and EMD to bid fees
+    try {
+      await syncTenderAmountsToBidFees(
+        tenderId,
+        existingTender.company_id,
+        parseFloat(formData.tender_fees) || 0,
+        parseFloat(formData.emd_amount) || 0,
+        {
+          tender_name: formData.tender_name,
+          tender247_id: formData.tender247_id,
+          gem_eprocure_id: formData.gem_eprocure_id
+        },
+        existingTender.created_by || ''
+      )
+    } catch (syncError: any) {
+      console.error('Failed to sync tender amounts to bid fees:', syncError)
+      // Don't throw - tender is updated, sync failure is logged
+    }
 
     return data
   },

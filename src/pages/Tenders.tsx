@@ -13,6 +13,7 @@ import TextArea from '@/components/base/TextArea'
 import BulletTextArea from '@/components/base/BulletTextArea'
 import Modal from '@/components/base/Modal'
 import Badge from '@/components/base/Badge'
+import * as XLSX from 'xlsx'
 
 export default function Tenders() {
   const { user, selectedCompany } = useAuth()
@@ -29,18 +30,28 @@ export default function Tenders() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [isExcelUploadModalOpen, setIsExcelUploadModalOpen] = useState(false)
   const [selectedTender, setSelectedTender] = useState<TenderWithUser | null>(null)
+  
+  // Excel upload states
+  const [excelFile, setExcelFile] = useState<File | null>(null)
+  const [excelDragActive, setExcelDragActive] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, errors: [] as string[] })
 
   // Filter states
   const [filters, setFilters] = useState({
     search: '',
     status: '',
     source: '',
-    assignedTo: ''
+    assignedTo: '',
+    city: '',
+    msmeExempted: false,
+    startupExempted: false
   })
 
   // Time filter states
-  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('all')
+  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('today')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
 
@@ -441,6 +452,19 @@ export default function Tenders() {
       setSubmitting(true)
       setError('')
       
+      // Check for duplicate IDs
+      const duplicateCheck = await tenderService.checkDuplicateIds(
+        selectedCompany.company_id,
+        formData.tender247_id,
+        formData.gem_eprocure_id
+      )
+      
+      if (duplicateCheck.isDuplicate) {
+        setError(duplicateCheck.message)
+        setSubmitting(false)
+        return
+      }
+      
       // Create the tender first
       const newTender = await tenderService.createTender(selectedCompany.company_id, user.id, formData)
       
@@ -478,11 +502,25 @@ export default function Tenders() {
   }
 
   const handleSubmitEdit = async () => {
-    if (!selectedTender || !user) return
+    if (!selectedTender || !user || !selectedCompany) return
 
     try {
       setSubmitting(true)
       setError('')
+      
+      // Check for duplicate IDs (excluding current tender)
+      const duplicateCheck = await tenderService.checkDuplicateIds(
+        selectedCompany.company_id,
+        formData.tender247_id,
+        formData.gem_eprocure_id,
+        selectedTender.id
+      )
+      
+      if (duplicateCheck.isDuplicate) {
+        setError(duplicateCheck.message)
+        setSubmitting(false)
+        return
+      }
       
       // Update the tender
       await tenderService.updateTender(selectedTender.id, formData)
@@ -519,6 +557,282 @@ export default function Tenders() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Download sample Excel template
+  const downloadSampleTemplate = () => {
+    const sampleData = [
+      {
+        'Tender247 ID': 'T247/2024/001',
+        'GEM/Eprocure ID': 'GEM/2024/B/4567890',
+        'Portal Link': 'https://example.com/tender/1',
+        'Tender Name': 'Sample Tender Name',
+        'Source': 'tender247',
+        'Tender Type': 'Construction',
+        'Location': 'Mumbai',
+        'Last Date': '2024-12-31',
+        'Expected Start Date': '2024-01-01',
+        'Expected End Date': '2024-06-30',
+        'Expected Days': '180',
+        'MSME Exempted': 'Yes',
+        'Startup Exempted': 'No',
+        'EMD Amount': '50000',
+        'Tender Fees': '10000',
+        'Tender Cost': '5000000',
+        'Status': 'new',
+        'Assigned To': '',
+        'Tender Notes': 'Sample notes',
+        'PQ Criteria': 'Sample PQ criteria'
+      }
+    ]
+
+    const ws = XLSX.utils.json_to_sheet(sampleData)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Tenders')
+    XLSX.writeFile(wb, 'tender-import-template.xlsx')
+  }
+
+  // Handle Excel file selection
+  const handleExcelFileSelect = (file: File) => {
+    const validExtensions = ['xlsx', 'xls']
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || ''
+    
+    if (!validExtensions.includes(fileExtension)) {
+      setError('Please upload a valid Excel file (.xlsx or .xls)')
+      return
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB')
+      return
+    }
+
+    setExcelFile(file)
+    setError('')
+  }
+
+  // Handle Excel drag and drop
+  const handleExcelDrag = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setExcelDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setExcelDragActive(false)
+    }
+  }
+
+  const handleExcelDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setExcelDragActive(false)
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleExcelFileSelect(e.dataTransfer.files[0])
+    }
+  }
+
+  const handleExcelFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleExcelFileSelect(e.target.files[0])
+    }
+  }
+
+  // Parse Excel and import tenders
+  const handleImportExcel = async () => {
+    if (!excelFile || !user || !selectedCompany) return
+
+    try {
+      setImporting(true)
+      setError('')
+      setImportProgress({ current: 0, total: 0, errors: [] })
+
+      // Read Excel file
+      const arrayBuffer = await excelFile.arrayBuffer()
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      const worksheet = workbook.Sheets[firstSheetName]
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
+
+      if (data.length < 2) {
+        setError('Excel file must contain at least a header row and one data row')
+        setImporting(false)
+        return
+      }
+
+      // Get header row
+      const headers = data[0].map((h: any) => String(h || '').trim().toLowerCase())
+      
+      // Map headers to form fields
+      const headerMap: { [key: string]: string } = {
+        'tender247 id': 'tender247_id',
+        'gem/eprocure id': 'gem_eprocure_id',
+        'portal link': 'portal_link',
+        'tender name': 'tender_name',
+        'source': 'source',
+        'tender type': 'tender_type',
+        'location': 'location',
+        'last date': 'last_date',
+        'expected start date': 'expected_start_date',
+        'expected end date': 'expected_end_date',
+        'expected days': 'expected_days',
+        'msme exempted': 'msme_exempted',
+        'startup exempted': 'startup_exempted',
+        'emd amount': 'emd_amount',
+        'tender fees': 'tender_fees',
+        'tender cost': 'tender_cost',
+        'status': 'status',
+        'assigned to': 'assigned_to',
+        'tender notes': 'tender_notes',
+        'pq criteria': 'pq_criteria'
+      }
+
+      // Validate required headers
+      const requiredHeaders = ['tender name']
+      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h))
+      if (missingHeaders.length > 0) {
+        setError(`Missing required columns: ${missingHeaders.join(', ')}`)
+        setImporting(false)
+        return
+      }
+
+      // Process data rows
+      const errors: string[] = []
+      const tendersToImport: TenderFormData[] = []
+      
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i]
+        if (!row || row.every((cell: any) => !cell)) continue // Skip empty rows
+
+        try {
+          const tenderData: any = {
+            tender_name: '',
+            msme_exempted: false,
+            startup_exempted: false,
+            emd_amount: '0',
+            tender_fees: '0',
+            tender_cost: '0',
+            status: 'new',
+            assigned_to: '',
+            tender247_id: '',
+            gem_eprocure_id: '',
+            portal_link: '',
+            source: '',
+            tender_type: '',
+            location: '',
+            last_date: '',
+            expected_start_date: '',
+            expected_end_date: '',
+            expected_days: '',
+            tender_notes: '',
+            pq_criteria: ''
+          }
+
+          // Map row data to tender fields
+          headers.forEach((header, index) => {
+            const fieldName = headerMap[header]
+            if (fieldName && row[index] !== undefined && row[index] !== null) {
+              const value = String(row[index]).trim()
+              
+              if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
+                tenderData[fieldName] = ['yes', 'y', 'true', '1'].includes(value.toLowerCase())
+              } else if (fieldName === 'assigned_to') {
+                // Try to find user by email or name
+                const user = users.find(u => 
+                  u.email?.toLowerCase() === value.toLowerCase() ||
+                  u.full_name?.toLowerCase() === value.toLowerCase()
+                )
+                tenderData[fieldName] = user?.user_id || ''
+              } else {
+                tenderData[fieldName] = value
+              }
+            }
+          })
+
+          // Validate required fields
+          if (!tenderData.tender_name) {
+            errors.push(`Row ${i + 1}: Tender Name is required`)
+            continue
+          }
+
+          tendersToImport.push(tenderData as TenderFormData)
+        } catch (rowError: any) {
+          errors.push(`Row ${i + 1}: ${rowError.message || 'Invalid data'}`)
+        }
+      }
+
+      if (tendersToImport.length === 0) {
+        setError('No valid tenders found in the Excel file')
+        setImporting(false)
+        return
+      }
+
+      // Import tenders
+      setImportProgress({ current: 0, total: tendersToImport.length, errors: [] })
+      const importErrors: string[] = []
+
+      for (let i = 0; i < tendersToImport.length; i++) {
+        try {
+          setImportProgress({ current: i + 1, total: tendersToImport.length, errors: importErrors })
+          
+          // Check for duplicate IDs
+          const duplicateCheck = await tenderService.checkDuplicateIds(
+            selectedCompany.company_id,
+            tendersToImport[i].tender247_id,
+            tendersToImport[i].gem_eprocure_id
+          )
+
+          if (duplicateCheck.isDuplicate) {
+            importErrors.push(`Row ${i + 2}: ${duplicateCheck.message}`)
+            continue
+          }
+
+          // Create tender
+          await tenderService.createTender(
+            selectedCompany.company_id,
+            user.id,
+            tendersToImport[i]
+          )
+        } catch (importError: any) {
+          importErrors.push(`Row ${i + 2}: ${importError.message || 'Failed to import'}`)
+        }
+      }
+
+      // Show results
+      const successCount = tendersToImport.length - importErrors.length
+      const allErrors = [...errors, ...importErrors]
+
+      if (allErrors.length > 0) {
+        setError(`Imported ${successCount} of ${tendersToImport.length} tenders. Errors: ${allErrors.join('; ')}`)
+      } else {
+        setError('')
+      }
+
+      if (successCount > 0) {
+        await loadData()
+        setIsExcelUploadModalOpen(false)
+        setExcelFile(null)
+        setImportProgress({ current: 0, total: 0, errors: [] })
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to import Excel file')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleOpenExcelUpload = () => {
+    setIsExcelUploadModalOpen(true)
+    setExcelFile(null)
+    setError('')
+    setImportProgress({ current: 0, total: 0, errors: [] })
+  }
+
+  const handleCloseExcelUpload = () => {
+    setIsExcelUploadModalOpen(false)
+    setExcelFile(null)
+    setError('')
+    setImportProgress({ current: 0, total: 0, errors: [] })
   }
 
   const handleConfirmDelete = async () => {
@@ -625,20 +939,26 @@ export default function Tenders() {
       const matchesStatus = !filters.status || tender.status === filters.status
       const matchesSource = !filters.source || tender.source === filters.source
       const matchesAssignedTo = !filters.assignedTo || tender.assigned_to === filters.assignedTo
+      const matchesCity = !filters.city || tender.location?.toLowerCase().includes(filters.city.toLowerCase())
+      const matchesMsme = !filters.msmeExempted || tender.msme_exempted === true
+      const matchesStartup = !filters.startupExempted || tender.startup_exempted === true
 
-      // Time filter based on last_date (tender deadline)
+      // Time filter based on created_at (tender creation date)
       let matchesTimeFilter = true
       if (timeFilter !== 'all') {
         const dateRange = getDateRange()
-        if (dateRange && tender.last_date) {
-          const tenderDate = new Date(tender.last_date)
+        if (dateRange && tender.created_at) {
+          const tenderDate = new Date(tender.created_at)
           matchesTimeFilter = tenderDate >= dateRange.start && tenderDate <= dateRange.end
         } else if (timeFilter === 'custom') {
           matchesTimeFilter = false // No valid custom range selected
+        } else {
+          // If no created_at date, exclude from filtered results
+          matchesTimeFilter = false
         }
       }
 
-      return matchesSearch && matchesStatus && matchesSource && matchesAssignedTo && matchesTimeFilter
+      return matchesSearch && matchesStatus && matchesSource && matchesAssignedTo && matchesCity && matchesMsme && matchesStartup && matchesTimeFilter
     })
 
     // Then, sort the filtered results
@@ -772,6 +1092,36 @@ export default function Tenders() {
     { value: 'eprocure', label: 'Eprocure' },
     { value: 'other', label: 'Other' }
   ]
+
+  // Get unique cities from tenders
+  const cityOptions = useMemo(() => {
+    const cities = new Set<string>()
+    tenders.forEach(tender => {
+      if (tender.location) {
+        cities.add(tender.location)
+      }
+    })
+    return [
+      { value: '', label: 'All Cities' },
+      ...Array.from(cities).sort().map(city => ({ value: city, label: city }))
+    ]
+  }, [tenders])
+
+  const handleClearFilters = () => {
+    setFilters({
+      search: '',
+      status: '',
+      source: '',
+      assignedTo: '',
+      city: '',
+      msmeExempted: false,
+      startupExempted: false
+    })
+    setTimeFilter('today')
+    setCustomStartDate('')
+    setCustomEndDate('')
+    setCurrentPage(1)
+  }
 
   const statusOptions = [
     { value: '', label: 'All Status' },
@@ -1138,17 +1488,26 @@ export default function Tenders() {
             <h1 className="text-2xl font-bold text-gray-900">Tenders</h1>
             <p className="text-gray-600 mt-1">Manage and track all tender opportunities</p>
           </div>
-          <Button onClick={handleAdd}>
-            <i className="ri-add-line mr-2"></i>
-            Add Tender
-          </Button>
+          <div className="flex gap-3">
+            <Button 
+              onClick={handleOpenExcelUpload}
+              className="!bg-green-600 hover:!bg-green-700 !text-white focus:!ring-green-500"
+            >
+              <i className="ri-upload-cloud-line mr-2"></i>
+              Upload Excel
+            </Button>
+            <Button onClick={handleAdd}>
+              <i className="ri-add-line mr-2"></i>
+              Add Tender
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
             <Input
-              placeholder="Search by name or ID"
+              placeholder="Search by Tender247 ID & Name"
               icon="ri-search-line"
               value={filters.search}
               onChange={(e) => {
@@ -1163,14 +1522,6 @@ export default function Tenders() {
                 setCurrentPage(1)
               }}
               options={statusOptions}
-            />
-            <Select
-              value={filters.source}
-              onChange={(e) => {
-                setFilters({ ...filters, source: e.target.value })
-                setCurrentPage(1)
-              }}
-              options={sourceOptions}
             />
             <Select
               value={timeFilter}
@@ -1193,10 +1544,60 @@ export default function Tenders() {
                 setCurrentPage(1)
               }}
               options={[
-                { value: '', label: 'All Users' },
+                { value: '', label: 'All Assigned' },
                 ...users.map(u => ({ value: u.user_id, label: `${u.full_name} (${u.role})` }))
               ]}
             />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <Input
+              placeholder="Search by City"
+              icon="ri-map-pin-line"
+              value={filters.city}
+              onChange={(e) => {
+                setFilters({ ...filters, city: e.target.value })
+                setCurrentPage(1)
+              }}
+            />
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.msmeExempted}
+                  onChange={(e) => {
+                    setFilters({ ...filters, msmeExempted: e.target.checked })
+                    setCurrentPage(1)
+                  }}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">MSME Exemption</span>
+              </label>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.startupExempted}
+                  onChange={(e) => {
+                    setFilters({ ...filters, startupExempted: e.target.checked })
+                    setCurrentPage(1)
+                  }}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Startup Exemption</span>
+              </label>
+            </div>
+            <div className="flex items-center">
+              <Button
+                onClick={handleClearFilters}
+                variant="outline"
+                className="w-full"
+              >
+                <i className="ri-filter-off-line mr-2"></i>
+                Clear Filter
+              </Button>
+            </div>
           </div>
 
           {/* Custom Date Range Inputs */}
@@ -1236,8 +1637,9 @@ export default function Tenders() {
                     <SortableHeader field="location" label="Location" />
                     <SortableHeader field="last_date" label="Last Date" />
                     <SortableHeader field="days_left" label="Days Left" />
-                    <SortableHeader field="tender_cost" label="Tender Amount" />
-                    <SortableHeader field="emd_amount" label="EMD Amount" />
+                    <SortableHeader field="tender_fees" label="Tender Fees" />
+                    <SortableHeader field="emd_amount" label="EMD" />
+                    <SortableHeader field="tender_cost" label="Tender Est. Cost" />
                     <SortableHeader field="status" label="Status" />
                     <SortableHeader field="assigned_to" label="Assigned To" />
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -1246,7 +1648,7 @@ export default function Tenders() {
                 <tbody className="divide-y divide-gray-200">
                   {currentTenders.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="px-6 py-12 text-center">
+                      <td colSpan={12} className="px-6 py-12 text-center">
                         <i className="ri-inbox-line text-4xl text-gray-400 mb-2"></i>
                         <p className="text-gray-500">No tenders found</p>
                       </td>
@@ -1269,8 +1671,9 @@ export default function Tenders() {
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.location || 'N/A'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.last_date || 'N/A'}</td>
                         <td className="px-6 py-4">{getDaysLeft(tender.last_date || null).badge}</td>
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.tender_cost)}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.tender_fees)}</td>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.emd_amount)}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(tender.tender_cost)}</td>
                         <td className="px-6 py-4">
                           {editingStatusId === tender.id ? (
                             <select
@@ -1288,6 +1691,7 @@ export default function Tenders() {
                               <option value="not-bidding">Not Bidding</option>
                               <option value="assigned">Assigned</option>
                               <option value="in-preparation">In Preparation</option>
+                              <option value="ready-to-submit">Ready to Submit</option>
                               <option value="submitted">Submitted</option>
                               <option value="under-evaluation">Under Evaluation</option>
                               <option value="qualified">Qualified</option>
@@ -1643,6 +2047,115 @@ export default function Tenders() {
             <div className="flex justify-center gap-3">
               <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>Cancel</Button>
               <Button variant="danger" onClick={handleConfirmDelete} loading={submitting}>Delete</Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Excel Upload Modal */}
+        <Modal isOpen={isExcelUploadModalOpen} onClose={handleCloseExcelUpload} title="Upload Excel File" size="md">
+          <div className="space-y-6">
+            {error && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start">
+                <i className="ri-error-warning-line text-red-600 text-xl mr-2 flex-shrink-0"></i>
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            )}
+
+            <div>
+              <p className="text-sm text-gray-600 mb-4">
+                Upload an Excel file with tender data. Download the sample template to see the required format.
+              </p>
+              <Button variant="outline" onClick={downloadSampleTemplate} className="w-full">
+                <i className="ri-download-line mr-2"></i>
+                Download Sample Template
+              </Button>
+            </div>
+
+            <div
+              onDragEnter={handleExcelDrag}
+              onDragOver={handleExcelDrag}
+              onDragLeave={handleExcelDrag}
+              onDrop={handleExcelDrop}
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                excelDragActive
+                  ? 'border-green-500 bg-green-50'
+                  : 'border-gray-300 bg-gray-50 hover:border-gray-400'
+              }`}
+            >
+              {excelFile ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-center">
+                    <i className="ri-file-excel-line text-6xl text-green-600"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{excelFile.name}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {(excelFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setExcelFile(null)}
+                    className="mt-2"
+                  >
+                    <i className="ri-close-line mr-2"></i>
+                    Remove File
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-center">
+                    <i className="ri-file-excel-line text-6xl text-green-600"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 mb-1">
+                      Drop Excel file here or{' '}
+                      <label className="text-blue-600 cursor-pointer hover:text-blue-700">
+                        browse to upload
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          onChange={handleExcelFileInput}
+                          className="hidden"
+                        />
+                      </label>
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-500">Supports .xlsx, .xls files only</p>
+                </div>
+              )}
+            </div>
+
+            {importing && importProgress.total > 0 && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Importing tenders...</span>
+                  <span className="text-gray-900 font-medium">
+                    {importProgress.current} / {importProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between gap-3 pt-4 border-t border-gray-200">
+              <Button variant="outline" onClick={handleCloseExcelUpload} disabled={importing}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleImportExcel}
+                loading={importing}
+                disabled={!excelFile || importing}
+                className="!bg-green-600 hover:!bg-green-700 !text-white focus:!ring-green-500"
+              >
+                <i className="ri-upload-cloud-line mr-2"></i>
+                Upload Excel
+              </Button>
             </div>
           </div>
         </Modal>

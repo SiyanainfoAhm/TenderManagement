@@ -199,66 +199,83 @@ export const bidFeeService = {
       throw new Error('No bid fee entries provided')
     }
 
-    const insertPayload = params.entries.map(entry => ({
-      company_id: params.companyId,
-      tender_id: params.tender.id,
-      tender_reference: params.tender.tender247_id || params.tender.gem_eprocure_id || params.tender.tender_name,
-      tender_name_snapshot: params.tender.tender_name,
-      fee_type: entry.fee_type,
-      payment_mode: entry.payment_mode,
-      amount: entry.amount,
-      refundable: entry.refundable,
-      status: entry.status,
-      due_date: entry.due_date || null,
-      notes: entry.notes || null,
-      utr_no: entry.utr_no || null,
-      bank_name: entry.bank_name || null,
-      ifsc: entry.ifsc || null,
-      txn_date: entry.txn_date || null,
-      gateway_ref: entry.gateway_ref || null,
-      dd_no: entry.dd_no || null,
-      payable_at: entry.payable_at || null,
-      issue_date: entry.issue_date || null,
-      expiry_date: entry.expiry_date || null,
-      maturity_date: entry.maturity_date || null,
-      issuing_bank: entry.issuing_bank || null,
-      bg_no: entry.bg_no || null,
-      bg_amount: entry.bg_amount || null,
-      claim_period: entry.claim_period || null,
-      urn_ref: entry.urn_ref || null,
-      fdr_no: entry.fdr_no || null,
-      bank: entry.bank || null,
-      lien_marked: entry.lien_marked ?? null,
-      receipt_no: entry.receipt_no || null,
-      created_by: params.createdBy
-    }))
+    const tenderReference = params.tender.tender247_id || params.tender.gem_eprocure_id || params.tender.tender_name
+    const createdFees: BidFee[] = []
 
-    const { data, error } = await supabase
-      .from(BID_FEE_TABLE)
-      .insert(insertPayload)
-      .select()
+    // Process each entry - ensure only one bid fee per type per tender
+    for (const entry of params.entries) {
+      // Get or create bid fee for this type
+      const bidFeeId = await this.getOrCreateBidFee(
+        params.tender.id,
+        entry.fee_type,
+        params.companyId,
+        params.tender,
+        params.createdBy
+      )
 
-    if (error) {
-      throw new Error(error.message || 'Failed to create bid fees')
-    }
-
-    const createdFees = data as BidFee[]
-
-    for (let i = 0; i < createdFees.length; i += 1) {
-      const entry = params.entries[i]
-      if (!entry.attachments || entry.attachments.length === 0) {
-        continue
+      // Update the existing bid fee with new data
+      const updatePayload: any = {
+        tender_reference: tenderReference,
+        tender_name_snapshot: params.tender.tender_name,
+        payment_mode: entry.payment_mode,
+        amount: entry.amount,
+        refundable: entry.refundable,
+        status: entry.status,
+        due_date: entry.due_date || null,
+        notes: entry.notes || null,
+        utr_no: entry.utr_no || null,
+        bank_name: entry.bank_name || null,
+        ifsc: entry.ifsc || null,
+        txn_date: entry.txn_date || null,
+        gateway_ref: entry.gateway_ref || null,
+        dd_no: entry.dd_no || null,
+        payable_at: entry.payable_at || null,
+        issue_date: entry.issue_date || null,
+        expiry_date: entry.expiry_date || null,
+        maturity_date: entry.maturity_date || null,
+        issuing_bank: entry.issuing_bank || null,
+        bg_no: entry.bg_no || null,
+        bg_amount: entry.bg_amount || null,
+        claim_period: entry.claim_period || null,
+        urn_ref: entry.urn_ref || null,
+        fdr_no: entry.fdr_no || null,
+        bank: entry.bank || null,
+        lien_marked: entry.lien_marked ?? null,
+        receipt_no: entry.receipt_no || null
       }
 
-      const attachments = await attachFiles(entry.attachments, {
-        companyId: params.companyId,
-        bidFeeId: createdFees[i].id,
-        uploadedBy: params.createdBy
-      })
+      const { data: updatedFee, error: updateError } = await supabase
+        .from(BID_FEE_TABLE)
+        .update(updatePayload)
+        .eq('id', bidFeeId)
+        .select()
+        .single()
 
-      createdFees[i] = {
-        ...createdFees[i],
-        attachments
+      if (updateError) {
+        throw new Error(updateError.message || `Failed to update bid fee for ${entry.fee_type}`)
+      }
+
+      const bidFee = updatedFee as BidFee
+
+      // Handle attachments
+      if (entry.attachments && entry.attachments.length > 0) {
+        const attachments = await attachFiles(entry.attachments, {
+          companyId: params.companyId,
+          bidFeeId: bidFee.id,
+          uploadedBy: params.createdBy
+        })
+
+        bidFee.attachments = attachments
+      }
+
+      createdFees.push(bidFee)
+
+      // Sync bid fee to tender amount
+      try {
+        await this.syncBidFeeToTender(bidFee.id)
+      } catch (syncError: any) {
+        console.error('Failed to sync bid fee to tender:', syncError)
+        // Don't throw - bid fee is created, sync failure is logged
       }
     }
 
@@ -275,6 +292,14 @@ export const bidFeeService = {
 
     if (error) {
       throw new Error(error.message || 'Failed to update bid fee')
+    }
+
+    // Sync bid fee to tender amount
+    try {
+      await this.syncBidFeeToTender(bidFeeId)
+    } catch (syncError: any) {
+      console.error('Failed to sync bid fee to tender:', syncError)
+      // Don't throw - bid fee is updated, sync failure is logged
     }
 
     const [hydrated] = await hydrateAttachments([data as BidFee])
@@ -309,6 +334,17 @@ export const bidFeeService = {
   },
 
   async deleteBidFee(bidFeeId: string): Promise<void> {
+    // Get bid fee details before deletion to sync with tender
+    const { data: bidFee, error: fetchError } = await supabase
+      .from(BID_FEE_TABLE)
+      .select('tender_id, fee_type')
+      .eq('id', bidFeeId)
+      .single()
+
+    if (fetchError) {
+      throw new Error(fetchError.message || 'Failed to fetch bid fee for deletion')
+    }
+
     const { data: attachments, error: attachmentsError } = await supabase
       .from(BID_FEE_ATTACHMENT_TABLE)
       .select('id, file_path')
@@ -338,14 +374,104 @@ export const bidFeeService = {
       }
     }
 
-    const { error } = await supabase
+    // Update bid fee amount to 0 instead of deleting
+    const { error: updateError } = await supabase
       .from(BID_FEE_TABLE)
-      .delete()
+      .update({ amount: 0 })
       .eq('id', bidFeeId)
 
-    if (error) {
-      throw new Error(error.message || 'Failed to delete bid fee')
+    if (updateError) {
+      throw new Error(updateError.message || 'Failed to update bid fee')
     }
+
+    // Sync to tender - set corresponding amount to 0
+    if (bidFee) {
+      const updateField = bidFee.fee_type === 'tender-fees' ? 'tender_fees' : 'emd_amount'
+      const { error: tenderUpdateError } = await supabase
+        .from(getTableName('tenders'))
+        .update({ [updateField]: 0 })
+        .eq('id', bidFee.tender_id)
+
+      if (tenderUpdateError) {
+        console.error('Failed to sync bid fee deletion to tender:', tenderUpdateError)
+        // Don't throw - bid fee is already updated, tender sync failure is logged
+      }
+    }
+  },
+
+  // Sync bid fee changes to tender
+  async syncBidFeeToTender(bidFeeId: string): Promise<void> {
+    const { data: bidFee, error } = await supabase
+      .from(BID_FEE_TABLE)
+      .select('tender_id, fee_type, amount')
+      .eq('id', bidFeeId)
+      .single()
+
+    if (error || !bidFee) {
+      throw new Error(error?.message || 'Failed to fetch bid fee for sync')
+    }
+
+    const updateField = bidFee.fee_type === 'tender-fees' ? 'tender_fees' : 'emd_amount'
+    const { error: updateError } = await supabase
+      .from(getTableName('tenders'))
+      .update({ [updateField]: bidFee.amount || 0 })
+      .eq('id', bidFee.tender_id)
+
+    if (updateError) {
+      throw new Error(updateError.message || 'Failed to sync bid fee to tender')
+    }
+  },
+
+  // Get or create single bid fee for a tender and fee type
+  async getOrCreateBidFee(
+    tenderId: string,
+    feeType: 'tender-fees' | 'emd',
+    companyId: string,
+    tender: Pick<Tender, 'tender_name' | 'tender247_id' | 'gem_eprocure_id'>,
+    userId: string
+  ): Promise<string> {
+    // Check if bid fee already exists
+    const { data: existing, error: fetchError } = await supabase
+      .from(BID_FEE_TABLE)
+      .select('id')
+      .eq('tender_id', tenderId)
+      .eq('fee_type', feeType)
+      .limit(1)
+      .single()
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      // PGRST116 is "no rows returned" - that's fine, we'll create one
+      throw new Error(fetchError.message || 'Failed to check existing bid fee')
+    }
+
+    if (existing) {
+      return existing.id
+    }
+
+    // Create new bid fee record
+    const tenderReference = tender.tender247_id || tender.gem_eprocure_id || tender.tender_name
+    const { data: newBidFee, error: createError } = await supabase
+      .from(BID_FEE_TABLE)
+      .insert({
+        company_id: companyId,
+        tender_id: tenderId,
+        tender_reference: tenderReference,
+        tender_name_snapshot: tender.tender_name,
+        fee_type: feeType,
+        payment_mode: 'online',
+        amount: 0,
+        refundable: false,
+        status: 'pending',
+        created_by: userId
+      })
+      .select('id')
+      .single()
+
+    if (createError) {
+      throw new Error(createError.message || 'Failed to create bid fee')
+    }
+
+    return newBidFee.id
   }
 }
 

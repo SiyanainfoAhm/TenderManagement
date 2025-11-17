@@ -10,6 +10,9 @@ interface CalendarViewProps {
 const weekDayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function getUserName(users: TimelineUser[], userId: string) {
+  if (userId === 'unassigned') {
+    return 'Unassigned'
+  }
   return users.find(user => user.id === userId)?.name || 'Unknown'
 }
 
@@ -43,22 +46,32 @@ export function CalendarView({ tenders, users, onTenderClick }: CalendarViewProp
     const map = new Map<string, TimelineTender[]>()
 
     tenders.forEach(tender => {
+      // Filter: Only show tenders where Expected Start Date and Expected End Date fall within the current month view
       const start = new Date(tender.estimatedStartDate)
       const end = new Date(tender.estimatedEndDate)
+      
+      // Get current month boundaries
+      const year = currentDate.getFullYear()
+      const month = currentDate.getMonth()
+      const monthStart = new Date(year, month, 1)
+      const monthEnd = new Date(year, month + 1, 0)
 
-      const pointer = new Date(start)
-      while (pointer <= end) {
-        const key = pointer.toDateString()
-        if (!map.has(key)) {
-          map.set(key, [])
+      // Only include tender if its date range overlaps with the current month
+      if (start <= monthEnd && end >= monthStart) {
+        const pointer = new Date(start)
+        while (pointer <= end) {
+          const key = pointer.toDateString()
+          if (!map.has(key)) {
+            map.set(key, [])
+          }
+          map.get(key)!.push(tender)
+          pointer.setDate(pointer.getDate() + 1)
         }
-        map.get(key)!.push(tender)
-        pointer.setDate(pointer.getDate() + 1)
       }
     })
 
     return map
-  }, [tenders])
+  }, [tenders, currentDate])
 
   const yearViewMonths = useMemo(() => {
     const months: Date[] = []
@@ -109,8 +122,8 @@ export function CalendarView({ tenders, users, onTenderClick }: CalendarViewProp
 
               const monthTenderCount = tenders.filter(tender => {
                 const start = new Date(tender.estimatedStartDate)
-                const end = new Date(tender.estimatedEndDate)
-                return start <= monthEnd && end >= monthStart
+                // Count only if Expected Start Date falls within this month
+                return start >= monthStart && start <= monthEnd
               }).length
 
               const intensity = Math.min(monthTenderCount / 5, 1)

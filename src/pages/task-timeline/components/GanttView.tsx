@@ -8,6 +8,9 @@ interface GanttViewProps {
 }
 
 function getUserName(users: TimelineUser[], userId: string) {
+  if (userId === 'unassigned') {
+    return 'Unassigned'
+  }
   return users.find(user => user.id === userId)?.name || 'Unknown'
 }
 
@@ -141,12 +144,23 @@ export function GanttView({ tenders, users, onTenderClick }: GanttViewProps) {
                     <div className="text-sm text-gray-700 truncate">{getUserName(users, tender.assignedTo)}</div>
                     <div
                       className={`text-xs px-2 py-1 rounded-full inline-block ${
-                        tender.status === 'Submitted'
+                        tender.status === 'submitted' || tender.status === 'won' || tender.status === 'qualified'
                           ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
+                          : tender.status === 'ready-to-submit' || tender.status === 'in-preparation'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : tender.status === 'lost' || tender.status === 'not-qualified' || tender.status === 'not-bidding'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-blue-100 text-blue-800'
                       }`}
                     >
-                      {tender.status}
+                      {tender.status === 'ready-to-submit' ? 'Ready to Submit' :
+                       tender.status === 'under-study' ? 'Under Study' :
+                       tender.status === 'wait-for-corrigendum' ? 'Wait for Corrigendum' :
+                       tender.status === 'in-preparation' ? 'In Preparation' :
+                       tender.status === 'under-evaluation' ? 'Under Evaluation' :
+                       tender.status === 'not-qualified' ? 'Not Qualified' :
+                       tender.status === 'not-bidding' ? 'Not Bidding' :
+                       tender.status}
                     </div>
                   </div>
                 </div>

@@ -273,7 +273,11 @@ export default function BidFeesPage() {
     setTenderError(null)
     try {
       const data = await tenderService.getTenders(companyId)
-      setTenders(data)
+      // Filter out tenders with statuses that shouldn't allow adding fees
+      // Statuses: submitted, ready-to-submit, under-evaluation, qualified, won
+      const excludedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
+      const filteredData = data.filter(tender => !excludedStatuses.includes(tender.status))
+      setTenders(filteredData)
     } catch (loadError: any) {
       setTenderError(loadError.message || 'Failed to load tenders')
     } finally {
@@ -480,8 +484,16 @@ export default function BidFeesPage() {
       return
     }
 
+    // Statuses that should NOT be visible in Add Fees section
+    const excludedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
+
     const lowerValue = value.toLowerCase()
     const filtered = tenders.filter(tender => {
+      // Exclude tenders with these statuses
+      if (excludedStatuses.includes(tender.status)) {
+        return false
+      }
+
       if (tenderSearchBy === 'id') {
         return (
           tender.tender247_id?.toLowerCase().includes(lowerValue) ||
@@ -496,10 +508,89 @@ export default function BidFeesPage() {
     setShowTenderDropdown(true)
   }
 
-  const handleTenderSelect = (tender: TenderWithUser) => {
+  const handleTenderSelect = async (tender: TenderWithUser) => {
     setSelectedTender(tender)
     setTenderSearchInput(tenderSearchBy === 'id' ? (tender.tender247_id || tender.gem_eprocure_id || '') : tender.tender_name)
     setShowTenderDropdown(false)
+
+    // Check for existing bid fees for this tender
+    if (companyId) {
+      try {
+        const existingFees = await bidFeeService.listBidFees(
+          companyId,
+          { tender_id: tender.id },
+          { page: 1, pageSize: 100 }
+        )
+
+        const updatedEntries: FeeEntryMap = { ...feeEntries }
+        const updatedFeeTypes: BidFeeType[] = [...selectedFeeTypes]
+
+        // Check for existing tender-fees bid fee
+        const existingTenderFees = existingFees.data.find(fee => fee.fee_type === 'tender-fees' && fee.amount > 0)
+        if (existingTenderFees) {
+          if (!updatedFeeTypes.includes('tender-fees')) {
+            updatedFeeTypes.push('tender-fees')
+          }
+          updatedEntries['tender-fees'] = mapBidFeeToDraft(existingTenderFees)
+        } else if (tender.tender_fees && tender.tender_fees > 0) {
+          // Use tender amount if no existing bid fee
+          if (!updatedFeeTypes.includes('tender-fees')) {
+            updatedFeeTypes.push('tender-fees')
+          }
+          updatedEntries['tender-fees'] = {
+            ...(updatedEntries['tender-fees'] || createFeeEntryDraft()),
+            amount: tender.tender_fees.toString()
+          }
+        }
+
+        // Check for existing emd bid fee
+        const existingEmd = existingFees.data.find(fee => fee.fee_type === 'emd' && fee.amount > 0)
+        if (existingEmd) {
+          if (!updatedFeeTypes.includes('emd')) {
+            updatedFeeTypes.push('emd')
+          }
+          updatedEntries['emd'] = mapBidFeeToDraft(existingEmd)
+        } else if (tender.emd_amount && tender.emd_amount > 0) {
+          // Use tender amount if no existing bid fee
+          if (!updatedFeeTypes.includes('emd')) {
+            updatedFeeTypes.push('emd')
+          }
+          updatedEntries['emd'] = {
+            ...(updatedEntries['emd'] || createFeeEntryDraft()),
+            amount: tender.emd_amount.toString()
+          }
+        }
+
+        setSelectedFeeTypes(updatedFeeTypes)
+        setFeeEntries(updatedEntries)
+      } catch (error: any) {
+        console.error('Failed to load existing bid fees:', error)
+        // Fallback to tender amounts if loading fails
+        const updatedEntries: FeeEntryMap = { ...feeEntries }
+
+        if (tender.tender_fees && tender.tender_fees > 0) {
+          if (!selectedFeeTypes.includes('tender-fees')) {
+            setSelectedFeeTypes(prev => [...prev, 'tender-fees'])
+          }
+          updatedEntries['tender-fees'] = {
+            ...(updatedEntries['tender-fees'] || createFeeEntryDraft()),
+            amount: tender.tender_fees.toString()
+          }
+        }
+
+        if (tender.emd_amount && tender.emd_amount > 0) {
+          if (!selectedFeeTypes.includes('emd')) {
+            setSelectedFeeTypes(prev => [...prev, 'emd'])
+          }
+          updatedEntries['emd'] = {
+            ...(updatedEntries['emd'] || createFeeEntryDraft()),
+            amount: tender.emd_amount.toString()
+          }
+        }
+
+        setFeeEntries(updatedEntries)
+      }
+    }
   }
 
   const handleFeeTypeToggle = (feeType: BidFeeType) => {

@@ -5,9 +5,13 @@ interface TenderSummaryDrawerProps {
   users: TimelineUser[]
   isOpen: boolean
   onClose: () => void
+  onOpenTenderDetails?: (tenderId: string) => void
 }
 
 function getUserName(users: TimelineUser[], userId: string) {
+  if (userId === 'unassigned') {
+    return 'Unassigned'
+  }
   return users.find(user => user.id === userId)?.name || 'Unknown'
 }
 
@@ -32,18 +36,52 @@ function calculateDuration(tender: TimelineTender) {
   return diff === 1 ? '1 day' : `${diff} days`
 }
 
-export function TenderSummaryDrawer({ tender, users, isOpen, onClose }: TenderSummaryDrawerProps) {
+export function TenderSummaryDrawer({ tender, users, isOpen, onClose, onOpenTenderDetails }: TenderSummaryDrawerProps) {
   if (!tender) {
     return null
   }
 
-  const statusStyles = {
-    'Ready to Submit': 'bg-yellow-100 text-yellow-800',
-    Submitted: 'bg-blue-100 text-blue-800',
-    'Under Review': 'bg-purple-100 text-purple-800',
-    Awarded: 'bg-green-100 text-green-800',
-    Rejected: 'bg-red-100 text-red-800'
-  } as Record<string, string>
+  // Map status to display name
+  const getStatusDisplayName = (status: string): string => {
+    const statusMap: Record<string, string> = {
+      'new': 'New',
+      'under-study': 'Under Study',
+      'on-hold': 'On Hold',
+      'will-bid': 'Will Bid',
+      'pre-bid': 'Pre-Bid',
+      'wait-for-corrigendum': 'Wait for Corrigendum',
+      'not-bidding': 'Not Bidding',
+      'assigned': 'Assigned',
+      'in-preparation': 'In Preparation',
+      'ready-to-submit': 'Ready to Submit',
+      'submitted': 'Submitted',
+      'under-evaluation': 'Under Evaluation',
+      'qualified': 'Qualified',
+      'not-qualified': 'Not Qualified',
+      'won': 'Won',
+      'lost': 'Lost'
+    }
+    return statusMap[status] || status
+  }
+
+  const statusStyles: Record<string, string> = {
+    'new': 'bg-gray-100 text-gray-800',
+    'under-study': 'bg-blue-100 text-blue-800',
+    'on-hold': 'bg-yellow-100 text-yellow-800',
+    'will-bid': 'bg-green-100 text-green-800',
+    'pre-bid': 'bg-purple-100 text-purple-800',
+    'wait-for-corrigendum': 'bg-orange-100 text-orange-800',
+    'not-bidding': 'bg-red-100 text-red-800',
+    'assigned': 'bg-indigo-100 text-indigo-800',
+    'in-preparation': 'bg-cyan-100 text-cyan-800',
+    'ready-to-submit': 'bg-yellow-100 text-yellow-800',
+    'submitted': 'bg-blue-100 text-blue-800',
+    'under-evaluation': 'bg-purple-100 text-purple-800',
+    'qualified': 'bg-green-100 text-green-800',
+    'not-qualified': 'bg-red-100 text-red-800',
+    'won': 'bg-green-100 text-green-800',
+    'lost': 'bg-red-100 text-red-800'
+  }
 
   return (
     <>
@@ -163,7 +201,7 @@ export function TenderSummaryDrawer({ tender, users, isOpen, onClose }: TenderSu
                 statusStyles[tender.status] || 'bg-gray-100 text-gray-800'
               }`}
             >
-              {tender.status}
+              {getStatusDisplayName(tender.status)}
             </span>
           </section>
         </div>
@@ -171,7 +209,13 @@ export function TenderSummaryDrawer({ tender, users, isOpen, onClose }: TenderSu
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
           <button
             type="button"
-            onClick={() => { window.location.href = `/tenders?view=${tender.id}` }}
+            onClick={() => {
+              if (onOpenTenderDetails) {
+                onOpenTenderDetails(tender.id)
+              } else {
+                window.location.href = `/tenders?view=${tender.id}`
+              }
+            }}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
             <i className="ri-external-link-line mr-2" />
