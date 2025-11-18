@@ -273,10 +273,10 @@ export default function BidFeesPage() {
     setTenderError(null)
     try {
       const data = await tenderService.getTenders(companyId)
-      // Filter out tenders with statuses that shouldn't allow adding fees
+      // Filter to show only tenders with statuses that should allow adding fees
       // Statuses: submitted, ready-to-submit, under-evaluation, qualified, won
-      const excludedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
-      const filteredData = data.filter(tender => !excludedStatuses.includes(tender.status))
+      const allowedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
+      const filteredData = data.filter(tender => allowedStatuses.includes(tender.status))
       setTenders(filteredData)
     } catch (loadError: any) {
       setTenderError(loadError.message || 'Failed to load tenders')
@@ -340,6 +340,35 @@ export default function BidFeesPage() {
     })
 
     return stats
+  }, [allBidFees])
+
+  // Calculate financial summary totals
+  const financialSummary = useMemo(() => {
+    let totalRefundable = 0
+    let totalRefunded = 0
+    let totalNonRefundable = 0
+    let totalAmount = 0
+
+    allBidFees.forEach(fee => {
+      totalAmount += fee.amount
+      
+      if (fee.status === 'refunded') {
+        totalRefunded += fee.amount
+      }
+      
+      if (fee.refundable) {
+        totalRefundable += fee.amount
+      } else {
+        totalNonRefundable += fee.amount
+      }
+    })
+
+    return {
+      totalRefundable,
+      totalRefunded,
+      totalNonRefundable,
+      totalAmount
+    }
   }, [allBidFees])
 
   const sortedFees = useMemo(() => {
@@ -484,13 +513,13 @@ export default function BidFeesPage() {
       return
     }
 
-    // Statuses that should NOT be visible in Add Fees section
-    const excludedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
+    // Statuses that should be visible in Add Fees section
+    const allowedStatuses = ['submitted', 'ready-to-submit', 'under-evaluation', 'qualified', 'won']
 
     const lowerValue = value.toLowerCase()
     const filtered = tenders.filter(tender => {
-      // Exclude tenders with these statuses
-      if (excludedStatuses.includes(tender.status)) {
+      // Only show tenders with these allowed statuses
+      if (!allowedStatuses.includes(tender.status)) {
         return false
       }
 
@@ -1711,6 +1740,41 @@ export default function BidFeesPage() {
             </div>
             {renderPagination()}
           </section>
+
+          {/* Financial Summary Section */}
+          {allBidFees.length > 0 && (
+            <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-center gap-6 overflow-x-auto">
+                <div className="text-center min-w-[180px]">
+                  <p className="text-xs text-gray-500 mb-1">TOTAL REFUNDABLE</p>
+                  <p className="text-2xl font-semibold text-green-600">
+                    {formatCurrency(financialSummary.totalRefundable)}
+                  </p>
+                </div>
+                
+                <div className="text-center min-w-[180px]">
+                  <p className="text-xs text-gray-500 mb-1">TOTAL REFUNDED</p>
+                  <p className="text-2xl font-semibold text-blue-600">
+                    {formatCurrency(financialSummary.totalRefunded)}
+                  </p>
+                </div>
+                
+                <div className="text-center min-w-[180px] border-l border-gray-200 pl-6">
+                  <p className="text-xs text-gray-500 mb-1">TOTAL NON-REFUNDABLE</p>
+                  <p className="text-2xl font-semibold text-red-600">
+                    {formatCurrency(financialSummary.totalNonRefundable)}
+                  </p>
+                </div>
+                
+                <div className="text-center min-w-[180px] border-l border-gray-200 pl-6">
+                  <p className="text-xs text-gray-500 mb-1">TOTAL AMOUNT</p>
+                  <p className="text-2xl font-semibold text-gray-900">
+                    {formatCurrency(financialSummary.totalAmount)}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
         </main>
       </div>
 

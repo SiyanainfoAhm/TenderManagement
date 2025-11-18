@@ -31,7 +31,9 @@ export default function Tenders() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isExcelUploadModalOpen, setIsExcelUploadModalOpen] = useState(false)
+  const [isReasonModalOpen, setIsReasonModalOpen] = useState(false)
   const [selectedTender, setSelectedTender] = useState<TenderWithUser | null>(null)
+  const [pendingStatusChange, setPendingStatusChange] = useState<{ tenderId: string; newStatus: string; reason: string } | null>(null)
   
   // Excel upload states
   const [excelFile, setExcelFile] = useState<File | null>(null)
@@ -279,6 +281,20 @@ export default function Tenders() {
   }
 
   const handleStatusChange = async (tenderId: string, newStatus: string) => {
+    // Check if status requires a reason
+    if (newStatus === 'not-bidding' || newStatus === 'not-qualified') {
+      const tender = tenders.find(t => t.id === tenderId)
+      setPendingStatusChange({ tenderId, newStatus, reason: tender?.not_bidding_reason || '' })
+      setIsReasonModalOpen(true)
+      setEditingStatusId(null) // Hide dropdown
+      return
+    }
+
+    // For other statuses, update directly
+    await updateTenderStatus(tenderId, newStatus, '')
+  }
+
+  const updateTenderStatus = async (tenderId: string, newStatus: string, reason: string) => {
     try {
       setLoading(true)
       // Update the tender status
@@ -300,7 +316,7 @@ export default function Tenders() {
           tender_notes: tender.tender_notes || '',
           status: newStatus,
           assigned_to: tender.assigned_to || '',
-          not_bidding_reason: tender.not_bidding_reason || ''
+          not_bidding_reason: reason
         }
         await tenderService.updateTender(tenderId, updatedTenderData)
         await loadData()
@@ -312,6 +328,20 @@ export default function Tenders() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleReasonSubmit = async () => {
+    if (!pendingStatusChange) return
+    
+    if (!pendingStatusChange.reason.trim()) {
+      setError('Reason is required for this status')
+      return
+    }
+
+    await updateTenderStatus(pendingStatusChange.tenderId, pendingStatusChange.newStatus, pendingStatusChange.reason)
+    setIsReasonModalOpen(false)
+    setPendingStatusChange(null)
+    setError('')
   }
 
   const handleStatusClick = (tenderId: string) => {
@@ -452,6 +482,13 @@ export default function Tenders() {
       setSubmitting(true)
       setError('')
       
+      // Validate reason for statuses that require it
+      if ((formData.status === 'not-bidding' || formData.status === 'not-qualified') && !formData.not_bidding_reason?.trim()) {
+        setError(`Reason is required for status "${formData.status === 'not-bidding' ? 'Not Bidding' : 'Not Qualified'}"`)
+        setSubmitting(false)
+        return
+      }
+      
       // Check for duplicate IDs
       const duplicateCheck = await tenderService.checkDuplicateIds(
         selectedCompany.company_id,
@@ -507,6 +544,13 @@ export default function Tenders() {
     try {
       setSubmitting(true)
       setError('')
+      
+      // Validate reason for statuses that require it
+      if ((formData.status === 'not-bidding' || formData.status === 'not-qualified') && !formData.not_bidding_reason?.trim()) {
+        setError(`Reason is required for status "${formData.status === 'not-bidding' ? 'Not Bidding' : 'Not Qualified'}"`)
+        setSubmitting(false)
+        return
+      }
       
       // Check for duplicate IDs (excluding current tender)
       const duplicateCheck = await tenderService.checkDuplicateIds(
@@ -1329,9 +1373,9 @@ export default function Tenders() {
         />
       </div>
 
-      {formData.status === 'not-bidding' && (
+      {(formData.status === 'not-bidding' || formData.status === 'not-qualified') && (
         <TextArea
-          label="Not Bidding Reason *"
+          label={formData.status === 'not-bidding' ? 'Not Bidding Reason *' : 'Not Qualified Reason *'}
           value={formData.not_bidding_reason}
           onChange={(e) => setFormData({ ...formData, not_bidding_reason: e.target.value })}
           placeholder="Please provide reason..."
@@ -2047,6 +2091,60 @@ export default function Tenders() {
             <div className="flex justify-center gap-3">
               <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>Cancel</Button>
               <Button variant="danger" onClick={handleConfirmDelete} loading={submitting}>Delete</Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Reason Modal for Status Change */}
+        <Modal 
+          isOpen={isReasonModalOpen} 
+          onClose={() => {
+            setIsReasonModalOpen(false)
+            setPendingStatusChange(null)
+            setError('')
+          }} 
+          title={pendingStatusChange?.newStatus === 'not-bidding' ? 'Not Bidding Reason' : 'Not Qualified Reason'} 
+          size="md"
+        >
+          <div className="space-y-4">
+            {error && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start">
+                <i className="ri-error-warning-line text-red-600 text-xl mr-2 flex-shrink-0"></i>
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            )}
+            
+            <TextArea
+              label={`${pendingStatusChange?.newStatus === 'not-bidding' ? 'Not Bidding' : 'Not Qualified'} Reason *`}
+              value={pendingStatusChange?.reason || ''}
+              onChange={(e) => {
+                if (pendingStatusChange) {
+                  setPendingStatusChange({ ...pendingStatusChange, reason: e.target.value })
+                }
+              }}
+              placeholder="Please provide reason..."
+              rows={4}
+              required
+            />
+            
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setIsReasonModalOpen(false)
+                  setPendingStatusChange(null)
+                  setError('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleReasonSubmit}
+                loading={loading}
+                disabled={!pendingStatusChange?.reason?.trim()}
+              >
+                Update Status
+              </Button>
             </div>
           </div>
         </Modal>
