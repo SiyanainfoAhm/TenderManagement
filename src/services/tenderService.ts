@@ -1,62 +1,64 @@
 import { supabase } from '@/lib/supabase'
 import { Tender, TenderWithUser, TenderFormData } from '@/types'
 import { getTableName } from '@/config/database'
-import { bidFeeService } from './bidFeeService'
 
-// Helper function to sync tender amounts to bid fees
-async function syncTenderAmountsToBidFees(
+// Helper function to update ONLY existing bid fees (do not create new ones)
+async function updateExistingBidFees(
   tenderId: string,
   companyId: string,
   tenderFees: number,
   emdAmount: number,
-  tender: Pick<Tender, 'tender_name' | 'tender247_id' | 'gem_eprocure_id'>,
-  userId: string
+  tender: Pick<Tender, 'tender_name' | 'tender247_id' | 'gem_eprocure_id'>
 ): Promise<void> {
   const BID_FEE_TABLE = getTableName('bid_fees')
   const tenderReference = tender.tender247_id || tender.gem_eprocure_id || tender.tender_name
 
-  // Sync Tender Fees
-  const tenderFeesBidFeeId = await bidFeeService.getOrCreateBidFee(
-    tenderId,
-    'tender-fees',
-    companyId,
-    tender,
-    userId
-  )
-
-  const { error: updateTenderFeesError } = await supabase
+  // Check and update Tender Fees (only if exists)
+  const { data: existingTenderFees, error: fetchTenderFeesError } = await supabase
     .from(BID_FEE_TABLE)
-    .update({
-      amount: tenderFees,
-      tender_reference: tenderReference,
-      tender_name_snapshot: tender.tender_name
-    })
-    .eq('id', tenderFeesBidFeeId)
+    .select('id')
+    .eq('tender_id', tenderId)
+    .eq('fee_type', 'tender-fees')
+    .limit(1)
+    .maybeSingle()
 
-  if (updateTenderFeesError) {
-    throw new Error(updateTenderFeesError.message || 'Failed to sync tender fees to bid fees')
+  if (!fetchTenderFeesError && existingTenderFees) {
+    const { error: updateTenderFeesError } = await supabase
+      .from(BID_FEE_TABLE)
+      .update({
+        amount: tenderFees,
+        tender_reference: tenderReference,
+        tender_name_snapshot: tender.tender_name
+      })
+      .eq('id', existingTenderFees.id)
+
+    if (updateTenderFeesError) {
+      console.error('Failed to update existing tender fees:', updateTenderFeesError)
+    }
   }
 
-  // Sync EMD Amount
-  const emdBidFeeId = await bidFeeService.getOrCreateBidFee(
-    tenderId,
-    'emd',
-    companyId,
-    tender,
-    userId
-  )
-
-  const { error: updateEmdError } = await supabase
+  // Check and update EMD (only if exists)
+  const { data: existingEmd, error: fetchEmdError } = await supabase
     .from(BID_FEE_TABLE)
-    .update({
-      amount: emdAmount,
-      tender_reference: tenderReference,
-      tender_name_snapshot: tender.tender_name
-    })
-    .eq('id', emdBidFeeId)
+    .select('id')
+    .eq('tender_id', tenderId)
+    .eq('fee_type', 'emd')
+    .limit(1)
+    .maybeSingle()
 
-  if (updateEmdError) {
-    throw new Error(updateEmdError.message || 'Failed to sync EMD amount to bid fees')
+  if (!fetchEmdError && existingEmd) {
+    const { error: updateEmdError } = await supabase
+      .from(BID_FEE_TABLE)
+      .update({
+        amount: emdAmount,
+        tender_reference: tenderReference,
+        tender_name_snapshot: tender.tender_name
+      })
+      .eq('id', existingEmd.id)
+
+    if (updateEmdError) {
+      console.error('Failed to update existing EMD:', updateEmdError)
+    }
   }
 }
 
@@ -248,24 +250,8 @@ export const tenderService = {
 
     if (error) throw new Error(error.message || 'Failed to create tender')
 
-    // Sync tender fees and EMD to bid fees
-    try {
-      await syncTenderAmountsToBidFees(
-        data.id,
-        companyId,
-        parseFloat(formData.tender_fees) || 0,
-        parseFloat(formData.emd_amount) || 0,
-        {
-          tender_name: formData.tender_name,
-          tender247_id: formData.tender247_id,
-          gem_eprocure_id: formData.gem_eprocure_id
-        },
-        userId
-      )
-    } catch (syncError: any) {
-      console.error('Failed to sync tender amounts to bid fees:', syncError)
-      // Don't throw - tender is created, sync failure is logged
-    }
+    // Do NOT create bid fees when adding a new tender
+    // Bid fees should only be created from the Bid Fees page
 
     return data
   },
@@ -316,9 +302,9 @@ export const tenderService = {
 
     if (error) throw new Error(error.message || 'Failed to update tender')
 
-    // Sync tender fees and EMD to bid fees
+    // Update ONLY existing bid fees (do not create new ones)
     try {
-      await syncTenderAmountsToBidFees(
+      await updateExistingBidFees(
         tenderId,
         existingTender.company_id,
         parseFloat(formData.tender_fees) || 0,
@@ -327,11 +313,10 @@ export const tenderService = {
           tender_name: formData.tender_name,
           tender247_id: formData.tender247_id,
           gem_eprocure_id: formData.gem_eprocure_id
-        },
-        existingTender.created_by || ''
+        }
       )
     } catch (syncError: any) {
-      console.error('Failed to sync tender amounts to bid fees:', syncError)
+      console.error('Failed to update existing bid fees:', syncError)
       // Don't throw - tender is updated, sync failure is logged
     }
 
