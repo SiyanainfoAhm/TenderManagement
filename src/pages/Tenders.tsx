@@ -1776,7 +1776,7 @@ export default function Tenders() {
                   <tr>
                     <SortableHeader field="tender_name" label="Tender Name" />
                     <SortableHeader field="tender247_id" label="Tender247 ID" />
-                    <SortableHeader field="source" label="Source" />
+                    <SortableHeader field="tender_type" label="Tender Type" />
                     <SortableHeader field="location" label="Location" />
                     <SortableHeader field="last_date" label="Last Date" />
                     <SortableHeader field="days_left" label="Days Left" />
@@ -1810,7 +1810,7 @@ export default function Tenders() {
                           </button>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.tender247_id || 'N/A'}</td>
-                        <td className="px-6 py-4 text-sm text-gray-600">{tender.source || 'N/A'}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600">{tender.tender_type || 'N/A'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.location || 'N/A'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{tender.last_date || 'N/A'}</td>
                         <td className="px-6 py-4">{getDaysLeft(tender.last_date || null).badge}</td>
