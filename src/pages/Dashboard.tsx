@@ -175,7 +175,8 @@ export default function Dashboard() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [showAllStatuses, setShowAllStatuses] = useState(false)
 
-  const mainStatCards = [
+  // First row - shown by default (5 cards)
+  const defaultStatusCards = [
     { 
       label: 'Total Tenders', 
       value: stats.total_tenders, 
@@ -185,9 +186,17 @@ export default function Dashboard() {
       iconColor: 'text-blue-600'
     },
     { 
-      label: 'Assigned', 
-      value: statusCounts.assigned || 0, 
-      icon: 'ri-user-line', 
+      label: 'Under Study', 
+      value: statusCounts['under-study'] || 0, 
+      icon: 'ri-book-open-line', 
+      color: 'gray',
+      bgColor: 'bg-gray-50',
+      iconColor: 'text-gray-600'
+    },
+    { 
+      label: 'In Preparation', 
+      value: statusCounts['in-preparation'] || 0, 
+      icon: 'ri-file-edit-line', 
       color: 'purple',
       bgColor: 'bg-purple-50',
       iconColor: 'text-purple-600'
@@ -201,14 +210,6 @@ export default function Dashboard() {
       iconColor: 'text-green-600'
     },
     { 
-      label: 'Won', 
-      value: statusCounts.won || 0, 
-      icon: 'ri-trophy-line', 
-      color: 'yellow',
-      bgColor: 'bg-yellow-50',
-      iconColor: 'text-yellow-600'
-    },
-    { 
       label: 'Not Bidding', 
       value: statusCounts['not-bidding'] || 0, 
       icon: 'ri-close-circle-line', 
@@ -218,30 +219,32 @@ export default function Dashboard() {
     }
   ]
 
-  const statusCards = [
+  // Additional status cards (shown when expanded) - organized in rows
+  const additionalStatusCards = [
+    // Second row
     { 
-      label: 'Under Study', 
-      value: statusCounts['under-study'] || 0, 
-      icon: 'ri-book-open-line', 
-      color: 'gray',
-      bgColor: 'bg-gray-50',
-      iconColor: 'text-gray-600'
-    },
-    { 
-      label: 'On Hold', 
-      value: statusCounts['on-hold'] || 0, 
-      icon: 'ri-pause-circle-line', 
-      color: 'orange',
-      bgColor: 'bg-orange-50',
-      iconColor: 'text-orange-600'
+      label: 'New', 
+      value: statusCounts.new || 0, 
+      icon: 'ri-star-line', 
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
     },
     { 
       label: 'Will Bid', 
       value: statusCounts['will-bid'] || 0, 
-      icon: 'ri-heart-line', 
-      color: 'teal',
-      bgColor: 'bg-teal-50',
-      iconColor: 'text-teal-600'
+      icon: 'ri-file-check-line', 
+      color: 'green',
+      bgColor: 'bg-green-50',
+      iconColor: 'text-green-600'
+    },
+    { 
+      label: 'Ready to Submit', 
+      value: statusCounts['ready-to-submit'] || 0, 
+      icon: 'ri-play-circle-line', 
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
     },
     { 
       label: 'Pre-Bid', 
@@ -254,34 +257,35 @@ export default function Dashboard() {
     { 
       label: 'Wait for Corrigendum', 
       value: statusCounts['wait-for-corrigendum'] || 0, 
-      icon: 'ri-file-check-line', 
+      icon: 'ri-file-edit-line', 
+      color: 'orange',
+      bgColor: 'bg-orange-50',
+      iconColor: 'text-orange-600'
+    },
+    // Third row
+    { 
+      label: 'On Hold', 
+      value: statusCounts['on-hold'] || 0, 
+      icon: 'ri-pause-circle-line', 
       color: 'orange',
       bgColor: 'bg-orange-50',
       iconColor: 'text-orange-600'
     },
     { 
-      label: 'In Preparation', 
-      value: statusCounts['in-preparation'] || 0, 
-      icon: 'ri-edit-line', 
-      color: 'blue',
-      bgColor: 'bg-blue-50',
-      iconColor: 'text-blue-600'
-    },
-    { 
-      label: 'Ready to Submit', 
-      value: statusCounts['ready-to-submit'] || 0, 
-      icon: 'ri-upload-cloud-line', 
-      color: 'indigo', 
-      bgColor: 'bg-indigo-50', 
-      iconColor: 'text-indigo-600' 
+      label: 'Assigned', 
+      value: statusCounts.assigned || 0, 
+      icon: 'ri-user-line', 
+      color: 'purple',
+      bgColor: 'bg-purple-50',
+      iconColor: 'text-purple-600'
     },
     { 
       label: 'Under Evaluation', 
       value: statusCounts['under-evaluation'] || 0, 
       icon: 'ri-search-line', 
-      color: 'teal',
-      bgColor: 'bg-teal-50',
-      iconColor: 'text-teal-600'
+      color: 'blue',
+      bgColor: 'bg-blue-50',
+      iconColor: 'text-blue-600'
     },
     { 
       label: 'Qualified', 
@@ -299,6 +303,15 @@ export default function Dashboard() {
       bgColor: 'bg-red-50',
       iconColor: 'text-red-600'
     },
+    // Fourth row
+    { 
+      label: 'Won', 
+      value: statusCounts.won || 0, 
+      icon: 'ri-trophy-line', 
+      color: 'yellow',
+      bgColor: 'bg-yellow-50',
+      iconColor: 'text-yellow-600'
+    },
     { 
       label: 'Lost', 
       value: statusCounts.lost || 0, 
@@ -308,11 +321,6 @@ export default function Dashboard() {
       iconColor: 'text-gray-600'
     }
   ]
-
-  // First 5 main status cards (shown by default)
-  const defaultStatusCards = mainStatCards
-  // All additional status cards (shown when expanded)
-  const additionalStatusCards = statusCards
 
   const getDaysLeft = (lastDate: string) => {
     const today = new Date()
