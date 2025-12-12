@@ -80,34 +80,35 @@ export const dashboardService = {
     }
 
     // With date range: compute stats via direct queries
+    // Date filter uses status_updated_date (when status was last updated)
     const startISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
     const endISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
 
-    // Total tenders in range
+    // Total tenders in range (filtered by status_updated_date)
     const totalQuery = supabase
       .from(getTableName('tenders'))
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
-      .gte('created_at', startISO)
-      .lte('created_at', endISO)
+      .gte('status_updated_date', startISO)
+      .lte('status_updated_date', endISO)
 
-    // Submitted in range
+    // Submitted in range (filtered by status_updated_date)
     const submittedQuery = supabase
       .from(getTableName('tenders'))
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .eq('status', 'submitted')
-      .gte('created_at', startISO)
-      .lte('created_at', endISO)
+      .gte('status_updated_date', startISO)
+      .lte('status_updated_date', endISO)
 
-    // Not-bidding in range
+    // Not-bidding in range (filtered by status_updated_date)
     const notBiddingQuery = supabase
       .from(getTableName('tenders'))
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .eq('status', 'not-bidding')
-      .gte('created_at', startISO)
-      .lte('created_at', endISO)
+      .gte('status_updated_date', startISO)
+      .lte('status_updated_date', endISO)
 
     // Active users (not date-bound)
     const activeUsersQuery = supabase

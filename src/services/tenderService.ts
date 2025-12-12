@@ -197,10 +197,14 @@ export const tenderService = {
       }
 
       if (startDate && endDate) {
-        console.log(`✓ Applying time filter: ${filters.timeFilter} from ${startDate.toISOString()} to ${endDate.toISOString()}`)
+        const startISO = startDate.toISOString()
+        const endISO = endDate.toISOString()
+        console.log(`✓ Applying time filter on status_updated_date: ${filters.timeFilter} from ${startISO} to ${endISO}`)
+        // Filter by status_updated_date (when status was last updated)
+        // Records with null status_updated_date will be excluded (they haven't had status updated yet)
         query = query
-          .gte('created_at', startDate.toISOString())
-          .lte('created_at', endDate.toISOString())
+          .gte('status_updated_date', startISO)
+          .lte('status_updated_date', endISO)
       }
     }
 
@@ -387,7 +391,8 @@ export const tenderService = {
       status: formData.status,
       assigned_to: assignedTo,
       not_bidding_reason: formData.not_bidding_reason || null,
-      created_by: userId
+      created_by: userId,
+      status_updated_date: new Date().toISOString() // Set initial status_updated_date when creating tender
     }
 
     const { data, error } = await supabase
@@ -432,14 +437,19 @@ export const tenderService = {
       not_bidding_reason: formData.not_bidding_reason || null
     }
 
-    // Get tender info for sync
+    // Get tender info for sync and check if status is changing
     const { data: existingTender, error: fetchError } = await supabase
       .from(getTableName('tenders'))
-      .select('company_id, created_by')
+      .select('company_id, created_by, status')
       .eq('id', tenderId)
       .single()
 
     if (fetchError) throw new Error(fetchError.message || 'Failed to fetch tender for update')
+
+    // If status is changing, update status_updated_date
+    if (existingTender.status !== formData.status) {
+      tenderData.status_updated_date = new Date().toISOString()
+    }
 
     const { data, error } = await supabase
       .from(getTableName('tenders'))
@@ -559,12 +569,13 @@ export const tenderService = {
       .eq('company_id', companyId) // Company filter - same as getTenders and getTendersWithFilters
 
     // Only apply date filters if dates are provided
+    // Filter by status_updated_date (when status was last updated)
     if (startDate && endDate) {
       const sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
       const untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
       baseQuery = baseQuery
-        .gte('created_at', sinceISO)
-        .lte('created_at', untilISO)
+        .gte('status_updated_date', sinceISO)
+        .lte('status_updated_date', untilISO)
     }
 
     // Get all statuses to find unique ones
@@ -583,6 +594,7 @@ export const tenderService = {
     const counts: Record<string, number> = {}
     
     // Query each status directly to get accurate count (matches getTendersWithFilters logic exactly)
+    // Date filter uses status_updated_date (when status was last updated)
     const countPromises = uniqueStatuses.map(async (status) => {
       let statusQuery = supabase
         .from(getTableName('tenders'))
@@ -594,8 +606,8 @@ export const tenderService = {
         const sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
         const untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
         statusQuery = statusQuery
-          .gte('created_at', sinceISO)
-          .lte('created_at', untilISO)
+          .gte('status_updated_date', sinceISO)
+          .lte('status_updated_date', untilISO)
       }
 
       const { count, error: countError } = await statusQuery

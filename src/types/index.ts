@@ -95,6 +95,7 @@ export interface Tender {
   created_by?: string
   created_at: string
   updated_at: string
+  status_updated_date?: string | null
 }
 
 // Tender with user details
