@@ -175,7 +175,45 @@ export default function Dashboard() {
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [showAllStatuses, setShowAllStatuses] = useState(false)
 
+  // Map status label to status value for filtering
+  const getStatusValue = (label: string): string | null => {
+    const statusMap: Record<string, string> = {
+      'Total Tenders': '', // No filter - show all
+      'Under Study': 'under-study',
+      'In Preparation': 'in-preparation',
+      'Submitted': 'submitted',
+      'Not Bidding': 'not-bidding',
+      'New': 'new',
+      'Will Bid': 'will-bid',
+      'Ready to Submit': 'ready-to-submit',
+      'Pre-Bid': 'pre-bid',
+      'Wait for Corrigendum': 'wait-for-corrigendum',
+      'On Hold': 'on-hold',
+      'Assigned': 'assigned',
+      'Under Evaluation': 'under-evaluation',
+      'Qualified': 'qualified',
+      'Not Qualified': 'not-qualified',
+      'Won': 'won',
+      'Lost': 'lost'
+    }
+    return statusMap[label] ?? null
+  }
+
+  // Handle status card click - navigate to tenders page with status filter
+  const handleStatusCardClick = (label: string) => {
+    const statusValue = getStatusValue(label)
+    if (statusValue === '') {
+      // Total Tenders - navigate without filter
+      navigate('/tenders')
+    } else if (statusValue) {
+      // Navigate with status filter
+      navigate(`/tenders?status=${statusValue}`)
+    }
+  }
+
   // First row - shown by default (5 cards)
+  // Note: Total Tenders uses stats.total_tenders (from getCompanyStats)
+  // Other status cards use statusCounts (from getStatusCounts) which matches Tenders page
   const defaultStatusCards = [
     { 
       label: 'Total Tenders', 
@@ -183,7 +221,8 @@ export default function Dashboard() {
       icon: 'ri-file-list-3-line', 
       color: 'blue',
       bgColor: 'bg-blue-50',
-      iconColor: 'text-blue-600'
+      iconColor: 'text-blue-600',
+      isTotal: true // Special flag for Total Tenders
     },
     { 
       label: 'Under Study', 
@@ -525,7 +564,8 @@ export default function Dashboard() {
               {defaultStatusCards.map((stat, index) => (
                 <div 
                   key={index} 
-                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
+                  onClick={() => handleStatusCardClick(stat.label)}
+                  className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105 cursor-pointer"
                 >
                   <div className="flex items-center">
                     <div className={`w-12 h-12 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
@@ -566,7 +606,8 @@ export default function Dashboard() {
                 {additionalStatusCards.map((status, index) => (
                   <div 
                     key={index} 
-                    className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105"
+                    onClick={() => handleStatusCardClick(status.label)}
+                    className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 hover:scale-105 cursor-pointer"
                   >
                     <div className="flex items-center">
                       <div className={`w-12 h-12 ${status.bgColor} rounded-lg flex items-center justify-center`}>

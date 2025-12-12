@@ -5,14 +5,20 @@ import { getFunctionName, getTableName } from '@/config/database'
 export const dashboardService = {
   // Get dashboard statistics for a company (supports optional date range)
   // If no date range is provided, fetches ALL data (no date filtering)
+  // Total tenders count should match getTenders().length exactly
+  // IMPORTANT: All queries use .eq('company_id', companyId) to filter by company
   async getCompanyStats(companyId: string, startDate?: string, endDate?: string): Promise<DashboardStats> {
+    console.log(`getCompanyStats called for company: ${companyId}`)
+    
     // If no date range passed, fetch ALL data (no date filtering)
+    // This should match exactly what getTenders returns
     if (!startDate || !endDate) {
-      // Total tenders (all time)
+      // Total tenders (all time) - use same query as getTenders
+      // CRITICAL: Uses .eq('company_id', companyId) - same company filter as getTenders
       const totalQuery = supabase
         .from(getTableName('tenders'))
         .select('id', { count: 'exact', head: true })
-        .eq('company_id', companyId)
+        .eq('company_id', companyId) // Company filter - ensures only this company's tenders
 
       // Submitted (all time)
       const submittedQuery = supabase
@@ -61,6 +67,8 @@ export const dashboardService = {
 
       const error = totalRes.error || submittedRes.error || notBidRes.error || activeUsersRes.error || upcomingRes.error
       if (error) throw new Error(error.message || 'Failed to fetch statistics')
+
+      console.log(`getCompanyStats: Total tenders for company ${companyId}: ${totalRes.count || 0} (with company filter applied)`)
 
       return {
         total_tenders: totalRes.count || 0,

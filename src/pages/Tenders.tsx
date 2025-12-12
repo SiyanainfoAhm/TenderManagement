@@ -118,8 +118,22 @@ export default function Tenders() {
   })
 
   useEffect(() => {
-    loadData()
-  }, [user, selectedCompany])
+    // Check for status filter in URL params first
+    const params = new URLSearchParams(location.search)
+    const statusParam = params.get('status')
+    
+    if (statusParam) {
+      // Set the status filter and apply it
+      setFilters(prev => ({ ...prev, status: statusParam }))
+      setAppliedFilters(prev => ({ ...prev, status: statusParam }))
+      // Apply the filter immediately
+      const filterParams: any = { status: statusParam }
+      loadData(filterParams)
+    } else {
+      // No status filter - load all data
+      loadData()
+    }
+  }, [user, selectedCompany, location.search])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -234,6 +248,13 @@ export default function Tenders() {
       ])
       
       console.log('Loaded tenders:', tendersData.length)
+      console.log('Tenders count from API (should match Dashboard):', tendersData.length)
+      
+      // If status filter is applied, log the count for that status
+      if (filterParams?.status) {
+        const statusCount = tendersData.filter(t => t.status === filterParams.status).length
+        console.log(`Tenders with status "${filterParams.status}": ${statusCount} (should match Dashboard count)`)
+      }
       
       setTenders(tendersData)
       setUsers(usersData.filter(u => u.is_active))
@@ -1020,10 +1041,12 @@ export default function Tenders() {
   // This memo ONLY handles client-side sorting for fast UI response
   // NO client-side filtering happens here - all filters (search, status, source, 
   // assignedTo, city, MSME/Startup exemptions, and date filters) are applied in the database
+  // IMPORTANT: The 'tenders' array contains EXACTLY what the API returns - no filtering, only sorting
   const filteredTenders = useMemo(() => {
     // All filtering is done on the database side via API
     // Only sorting is done client-side for fast response
     // The 'tenders' array already contains only the filtered results from the API
+    // NO .filter() calls - we use the tenders array directly from API
     return [...tenders].sort((a, b) => {
       let aValue: any = a[sortField as keyof typeof a]
       let bValue: any = b[sortField as keyof typeof b]
@@ -1066,7 +1089,9 @@ export default function Tenders() {
     })
   }, [tenders, sortField, sortDirection])
 
-  const totalPages = Math.ceil(filteredTenders.length / itemsPerPage)
+  // Use tenders.length for pagination to match API result count exactly
+  // filteredTenders is only for sorting, but count comes from API (tenders array)
+  const totalPages = Math.ceil(tenders.length / itemsPerPage)
   const currentTenders = filteredTenders.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
@@ -1885,10 +1910,11 @@ export default function Tenders() {
             </div>
 
             {/* Pagination */}
-            {filteredTenders.length > 0 && (
+            {/* Count uses tenders.length (direct from API) to match Dashboard count exactly */}
+            {tenders.length > 0 && (
               <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
                 <div className="text-sm text-gray-700">
-                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, filteredTenders.length)} of {filteredTenders.length} tenders
+                  Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, tenders.length)} of {tenders.length} tenders
                 </div>
                 <div className="flex items-center gap-2">
                   <Button

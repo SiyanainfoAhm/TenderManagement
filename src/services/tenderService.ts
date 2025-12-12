@@ -64,7 +64,10 @@ async function updateExistingBidFees(
 
 export const tenderService = {
   // Get all tenders for a company (NO date filtering - shows ALL tenders)
+  // IMPORTANT: Uses .eq('company_id', companyId) to filter by company
   async getTenders(companyId: string): Promise<TenderWithUser[]> {
+    console.log(`getTenders called for company: ${companyId}`)
+    
     const { data, error } = await supabase
       .from(getTableName('tenders'))
       .select(`
@@ -72,11 +75,13 @@ export const tenderService = {
         assigned_user:tender1_users!tender1_tenders_assigned_to_fkey(full_name),
         created_user:tender1_users!tender1_tenders_created_by_fkey(full_name)
       `)
-      .eq('company_id', companyId)
+      .eq('company_id', companyId) // Company filter - ensures only this company's tenders
       .order('created_at', { ascending: false })
 
     if (error) throw new Error(error.message || 'Failed to fetch tenders')
 
+    console.log(`getTenders: Fetched ${data?.length || 0} tenders for company ${companyId} (with company filter applied)`)
+    
     return (data || []).map(tender => ({
       ...tender,
       assigned_user_name: tender.assigned_user?.full_name,
@@ -85,6 +90,7 @@ export const tenderService = {
   },
 
   // Get tenders with dynamic filters (all filtering done on DB side)
+  // IMPORTANT: Uses .eq('company_id', companyId) to filter by company - same as getTenders and getStatusCounts
   async getTendersWithFilters(
     companyId: string,
     filters?: {
@@ -100,7 +106,7 @@ export const tenderService = {
       customEndDate?: string
     }
   ): Promise<TenderWithUser[]> {
-    console.log('getTendersWithFilters called with filters:', filters)
+    console.log(`getTendersWithFilters called for company: ${companyId} with filters:`, filters)
     
     let query = supabase
       .from(getTableName('tenders'))
@@ -109,7 +115,7 @@ export const tenderService = {
         assigned_user:tender1_users!tender1_tenders_assigned_to_fkey(full_name),
         created_user:tender1_users!tender1_tenders_created_by_fkey(full_name)
       `)
-      .eq('company_id', companyId)
+      .eq('company_id', companyId) // Company filter - ensures only this company's tenders (same as getTenders and getStatusCounts)
 
     // Search filter - search in tender_name, tender247_id, and gem_eprocure_id
     if (filters?.search && filters.search.trim() !== '') {
@@ -119,7 +125,7 @@ export const tenderService = {
     }
 
     if (filters?.status && filters.status.trim() !== '') {
-      console.log('✓ Applying status filter:', filters.status)
+      console.log(`✓ Applying status filter: "${filters.status}" for company ${companyId}`)
       query = query.eq('status', filters.status)
     }
     if (filters?.source && filters.source.trim() !== '') {
@@ -208,7 +214,16 @@ export const tenderService = {
     }
 
     const resultCount = data?.length || 0
-    console.log(`✅ getTendersWithFilters returned ${resultCount} tenders`)
+    
+    // Debug: If status filter is applied, log the status values
+    if (filters?.status) {
+      const statusValues = data?.map((t: any) => t.status) || []
+      console.log(`✅ getTendersWithFilters returned ${resultCount} tenders for company ${companyId} with status "${filters.status}"`)
+      console.log(`   Status values found:`, statusValues)
+      console.log(`   Count of tenders with exact status "${filters.status}":`, statusValues.filter((s: string) => s === filters.status).length)
+    } else {
+      console.log(`✅ getTendersWithFilters returned ${resultCount} tenders for company ${companyId} (with company filter applied)`)
+    }
     
     return (data || []).map(tender => ({
       ...tender,
@@ -531,40 +546,74 @@ export const tenderService = {
     }))
   },
 
-  // Get status counts for dashboard
+  // Get status counts for dashboard - counts should match what Tenders page shows
+  // IMPORTANT: This now uses the SAME query approach as getTendersWithFilters to ensure exact match
+  // Instead of fetching all and counting, we query each status directly using count queries (more accurate)
   async getStatusCounts(companyId: string, startDate?: string, endDate?: string): Promise<Record<string, number>> {
-    // Build date constraints - if no dates provided, fetch ALL data (no date filtering)
-    let sinceISO: string | undefined
-    let untilISO: string | undefined
-    if (startDate && endDate) {
-      sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
-      untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
-    }
-    // If no dates provided, don't set sinceISO/untilISO - fetch all data
-
-    let query = supabase
+    console.log(`getStatusCounts called for company: ${companyId}`)
+    
+    // First, get all unique statuses to know which ones to count
+    let baseQuery = supabase
       .from(getTableName('tenders'))
-      .select('status, created_at')
-      .eq('company_id', companyId)
+      .select('status')
+      .eq('company_id', companyId) // Company filter - same as getTenders and getTendersWithFilters
 
     // Only apply date filters if dates are provided
-    if (sinceISO) {
-      query = query.gte('created_at', sinceISO)
-    }
-    if (untilISO) {
-      query = query.lte('created_at', untilISO)
+    if (startDate && endDate) {
+      const sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
+      const untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
+      baseQuery = baseQuery
+        .gte('created_at', sinceISO)
+        .lte('created_at', untilISO)
     }
 
-    const { data, error } = await query
+    // Get all statuses to find unique ones
+    const { data: allTenders, error } = await baseQuery
 
     if (error) throw new Error(error.message || 'Failed to fetch status counts')
 
+    console.log(`getStatusCounts: Fetched ${allTenders?.length || 0} tenders for company ${companyId} (with company filter applied)`)
+
+    // Get unique statuses
+    const uniqueStatuses = [...new Set(allTenders?.map((t: any) => t.status).filter(Boolean))] as string[]
+    console.log('getStatusCounts - Unique statuses found:', uniqueStatuses)
+
+    // Count each status by querying directly (same approach as getTendersWithFilters uses)
+    // This ensures we use the exact same query logic and get accurate counts
     const counts: Record<string, number> = {}
-    data?.forEach(tender => {
-      const status = tender.status
-      counts[status] = (counts[status] || 0) + 1
+    
+    // Query each status directly to get accurate count (matches getTendersWithFilters logic exactly)
+    const countPromises = uniqueStatuses.map(async (status) => {
+      let statusQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .eq('status', status)
+
+      if (startDate && endDate) {
+        const sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
+        const untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
+        statusQuery = statusQuery
+          .gte('created_at', sinceISO)
+          .lte('created_at', untilISO)
+      }
+
+      const { count, error: countError } = await statusQuery
+      if (countError) {
+        console.error(`Error counting status ${status}:`, countError)
+        return { status, count: 0 }
+      }
+      return { status, count: count || 0 }
     })
 
+    const countResults = await Promise.all(countPromises)
+    countResults.forEach(({ status, count }) => {
+      counts[status] = count
+    })
+
+    console.log('getStatusCounts result:', counts)
+    console.log(`getStatusCounts - Count for "under-study": ${counts['under-study'] || 0}`)
+    
     return counts
   },
 
