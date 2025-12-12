@@ -953,6 +953,193 @@ export default function BidFeesPage() {
     }
   }
 
+  // Render payment mode fields for Edit modal (same structure as Add Fee)
+  const renderPaymentModeFieldsForEdit = (entry: FeeEntryDraft) => {
+    switch (entry.paymentMode) {
+      case 'NEFT/RTGS':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="UTR No."
+              value={entry.utrNo}
+              onChange={event => handleEditChange('utrNo', event.target.value)}
+              placeholder="Enter UTR number"
+            />
+            <Input
+              label="Bank Name"
+              value={entry.bankName}
+              onChange={event => handleEditChange('bankName', event.target.value)}
+              placeholder="Enter bank name"
+            />
+            <Input
+              label="IFSC Code"
+              value={entry.ifsc}
+              onChange={event => handleEditChange('ifsc', event.target.value)}
+              placeholder="Enter IFSC code"
+            />
+            <Input
+              label="Transaction Date"
+              type="date"
+              value={entry.txnDate}
+              onChange={event => handleEditChange('txnDate', event.target.value)}
+            />
+          </div>
+        )
+      case 'Net-Banking/UPI':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Gateway/Ref ID"
+              value={entry.gatewayRef}
+              onChange={event => handleEditChange('gatewayRef', event.target.value)}
+              placeholder="Enter gateway/reference ID"
+            />
+            <Input
+              label="Transaction Date"
+              type="date"
+              value={entry.txnDate}
+              onChange={event => handleEditChange('txnDate', event.target.value)}
+            />
+          </div>
+        )
+      case 'DD / Banker\'s Cheque':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="DD No."
+              value={entry.ddNo}
+              onChange={event => handleEditChange('ddNo', event.target.value)}
+              placeholder="Enter DD number"
+            />
+            <Input
+              label="Issuing Bank"
+              value={entry.issuingBank}
+              onChange={event => handleEditChange('issuingBank', event.target.value)}
+              placeholder="Enter issuing bank"
+            />
+            <Input
+              label="Payable At"
+              value={entry.payableAt}
+              onChange={event => handleEditChange('payableAt', event.target.value)}
+              placeholder="Enter payable location"
+            />
+            <Input
+              label="Issue Date"
+              type="date"
+              value={entry.issueDate}
+              onChange={event => handleEditChange('issueDate', event.target.value)}
+            />
+            <Input
+              label="Expiry Date"
+              type="date"
+              value={entry.expiryDate}
+              onChange={event => handleEditChange('expiryDate', event.target.value)}
+            />
+          </div>
+        )
+      case 'FDR':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="FDR No."
+              value={entry.fdrNo}
+              onChange={event => handleEditChange('fdrNo', event.target.value)}
+              placeholder="Enter FDR number"
+            />
+            <Input
+              label="Bank"
+              value={entry.bank}
+              onChange={event => handleEditChange('bank', event.target.value)}
+              placeholder="Enter bank name"
+            />
+            <Input
+              label="Issue Date"
+              type="date"
+              value={entry.issueDate}
+              onChange={event => handleEditChange('issueDate', event.target.value)}
+            />
+            <Input
+              label="Maturity Date"
+              type="date"
+              value={entry.maturityDate}
+              onChange={event => handleEditChange('maturityDate', event.target.value)}
+            />
+            <label className="flex items-center text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={entry.lienMarked}
+                onChange={event => handleEditChange('lienMarked', event.target.checked)}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mr-2"
+              />
+              Lien Marked
+            </label>
+          </div>
+        )
+      case 'Bank Guarantee / e-BG':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="BG No."
+              value={entry.bgNo}
+              onChange={event => handleEditChange('bgNo', event.target.value)}
+              placeholder="Enter BG number"
+            />
+            <Input
+              label="Issuing Bank"
+              value={entry.issuingBank}
+              onChange={event => handleEditChange('issuingBank', event.target.value)}
+              placeholder="Enter issuing bank"
+            />
+            <Input
+              label="BG Amount"
+              type="number"
+              value={entry.bgAmount}
+              onChange={event => handleEditChange('bgAmount', event.target.value)}
+              placeholder="Enter BG amount"
+            />
+            <Input
+              label="Issue Date"
+              type="date"
+              value={entry.issueDate}
+              onChange={event => handleEditChange('issueDate', event.target.value)}
+            />
+            <Input
+              label="Expiry Date"
+              type="date"
+              value={entry.expiryDate}
+              onChange={event => handleEditChange('expiryDate', event.target.value)}
+            />
+            <Input
+              label="Claim Period"
+              value={entry.claimPeriod}
+              onChange={event => handleEditChange('claimPeriod', event.target.value)}
+              placeholder="e.g., 30 days"
+            />
+            <Input
+              label="URN/Ref No."
+              value={entry.urnRef}
+              onChange={event => handleEditChange('urnRef', event.target.value)}
+              placeholder="Enter URN/Reference number"
+            />
+          </div>
+        )
+      case 'Cash':
+      case 'Other':
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Receipt No."
+              value={entry.receiptNo}
+              onChange={event => handleEditChange('receiptNo', event.target.value)}
+              placeholder="Enter receipt number"
+            />
+          </div>
+        )
+      default:
+        return null
+    }
+  }
+
   const renderAttachmentSection = (feeType: BidFeeType, entry: FeeEntryDraft) => (
     <div className="space-y-4">
       <label className="block text-sm font-medium text-gray-700">Attachments</label>
@@ -1890,6 +2077,208 @@ export default function BidFeesPage() {
                 <p className="text-sm text-gray-900">{selectedFee.notes}</p>
               </div>
             )}
+            {/* Payment Mode Specific Fields */}
+            {selectedFee.payment_mode && (() => {
+              switch (selectedFee.payment_mode) {
+                case 'NEFT/RTGS':
+                  return (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Payment Details (NEFT/RTGS)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedFee.utr_no && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">UTR No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.utr_no}</p>
+                          </div>
+                        )}
+                        {selectedFee.bank_name && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
+                            <p className="text-sm text-gray-900">{selectedFee.bank_name}</p>
+                          </div>
+                        )}
+                        {selectedFee.ifsc && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">IFSC Code</label>
+                            <p className="text-sm text-gray-900">{selectedFee.ifsc}</p>
+                          </div>
+                        )}
+                        {selectedFee.txn_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.txn_date}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                case 'Net-Banking/UPI':
+                  return (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Payment Details (Net-Banking/UPI)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedFee.gateway_ref && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Gateway/Ref ID</label>
+                            <p className="text-sm text-gray-900">{selectedFee.gateway_ref}</p>
+                          </div>
+                        )}
+                        {selectedFee.txn_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.txn_date}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                case 'DD / Banker\'s Cheque':
+                  return (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Payment Details (DD / Banker's Cheque)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedFee.dd_no && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">DD No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.dd_no}</p>
+                          </div>
+                        )}
+                        {selectedFee.issuing_bank && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Issuing Bank</label>
+                            <p className="text-sm text-gray-900">{selectedFee.issuing_bank}</p>
+                          </div>
+                        )}
+                        {selectedFee.payable_at && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Payable At</label>
+                            <p className="text-sm text-gray-900">{selectedFee.payable_at}</p>
+                          </div>
+                        )}
+                        {selectedFee.issue_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Issue Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.issue_date}</p>
+                          </div>
+                        )}
+                        {selectedFee.expiry_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.expiry_date}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                case 'FDR':
+                  return (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Payment Details (FDR)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedFee.fdr_no && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">FDR No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.fdr_no}</p>
+                          </div>
+                        )}
+                        {selectedFee.bank && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Bank</label>
+                            <p className="text-sm text-gray-900">{selectedFee.bank}</p>
+                          </div>
+                        )}
+                        {selectedFee.issue_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Issue Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.issue_date}</p>
+                          </div>
+                        )}
+                        {selectedFee.maturity_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Maturity Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.maturity_date}</p>
+                          </div>
+                        )}
+                        {selectedFee.lien_marked !== null && selectedFee.lien_marked !== undefined && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Lien Marked</label>
+                            <Badge variant={selectedFee.lien_marked ? 'green' : 'gray'}>
+                              {selectedFee.lien_marked ? 'Yes' : 'No'}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                case 'Bank Guarantee / e-BG':
+                  return (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Payment Details (Bank Guarantee / e-BG)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedFee.bg_no && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">BG No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.bg_no}</p>
+                          </div>
+                        )}
+                        {selectedFee.issuing_bank && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Issuing Bank</label>
+                            <p className="text-sm text-gray-900">{selectedFee.issuing_bank}</p>
+                          </div>
+                        )}
+                        {selectedFee.bg_amount !== null && selectedFee.bg_amount !== undefined && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">BG Amount</label>
+                            <p className="text-sm text-gray-900">{formatCurrency(selectedFee.bg_amount)}</p>
+                          </div>
+                        )}
+                        {selectedFee.issue_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Issue Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.issue_date}</p>
+                          </div>
+                        )}
+                        {selectedFee.expiry_date && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                            <p className="text-sm text-gray-900">{selectedFee.expiry_date}</p>
+                          </div>
+                        )}
+                        {selectedFee.claim_period && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Claim Period</label>
+                            <p className="text-sm text-gray-900">{selectedFee.claim_period}</p>
+                          </div>
+                        )}
+                        {selectedFee.urn_ref && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">URN/Ref No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.urn_ref}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                case 'Cash':
+                case 'Other':
+                  return (
+                    selectedFee.receipt_no && (
+                      <div className="space-y-3">
+                        <h4 className="text-sm font-medium text-gray-700">Payment Details ({selectedFee.payment_mode})</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Receipt No.</label>
+                            <p className="text-sm text-gray-900">{selectedFee.receipt_no}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  )
+                default:
+                  return null
+              }
+            })()}
             {selectedFee.attachments && selectedFee.attachments.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1969,11 +2358,25 @@ export default function BidFeesPage() {
               </label>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Payment Mode"
-                value={editDraft.paymentMode}
-                onChange={event => handleEditChange('paymentMode', event.target.value as BidFeePaymentMode)}
-              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Mode *</label>
+                <div className="relative">
+                  <select
+                    value={editDraft.paymentMode}
+                    onChange={event => handleEditChange('paymentMode', event.target.value as BidFeePaymentMode)}
+                    className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  >
+                    <option value="">Select payment mode</option>
+                    {paymentModeOptions.map(mode => (
+                      <option key={mode} value={mode}>
+                        {mode}
+                      </option>
+                    ))}
+                  </select>
+                  <i className="ri-arrow-down-s-line absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                </div>
+              </div>
               <Input
                 label="Notes"
                 value={editDraft.notes}
@@ -1981,6 +2384,8 @@ export default function BidFeesPage() {
                 placeholder="Additional notes..."
               />
             </div>
+            {/* Payment Mode Specific Fields */}
+            {editDraft.paymentMode && renderPaymentModeFieldsForEdit(editDraft)}
             <div className="space-y-3">
               <label className="block text-sm font-medium text-gray-700">Attachments</label>
               <div className="flex items-center gap-3">
