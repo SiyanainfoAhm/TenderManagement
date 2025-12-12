@@ -873,11 +873,15 @@ export default function Tenders() {
             pq_criteria: ''
           }
 
-          // Map row data to tender fields
+          // Map row data to tender fields with length limits
+          // Database column limits:
+          // tender_name: VARCHAR(500), tender247_id: VARCHAR(100), gem_eprocure_id: VARCHAR(100)
+          // location: VARCHAR(255), source: VARCHAR(100), portal_link: TEXT (unlimited but reasonable)
+          // tender_notes: TEXT, pq_criteria: TEXT
           headers.forEach((header, index) => {
             const fieldName = headerMap[header]
             if (fieldName && row[index] !== undefined && row[index] !== null) {
-              const value = String(row[index]).trim()
+              let value = String(row[index]).trim()
               
               if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
                 tenderData[fieldName] = ['yes', 'y', 'true', '1'].includes(value.toLowerCase())
@@ -889,6 +893,74 @@ export default function Tenders() {
                 )
                 tenderData[fieldName] = user?.user_id || ''
               } else {
+                // Apply length limits based on database column constraints
+                // Truncate text if it exceeds the limit
+                switch (fieldName) {
+                  case 'tender_name':
+                    // VARCHAR(500) - limit 500 characters
+                    if (value.length > 500) {
+                      value = value.substring(0, 500)
+                      console.warn(`Row ${i + 1}: Tender Name truncated from ${String(row[index]).length} to 500 characters`)
+                    }
+                    break
+                  case 'tender247_id':
+                    // VARCHAR(100) - limit 100 characters
+                    if (value.length > 100) {
+                      value = value.substring(0, 100)
+                      console.warn(`Row ${i + 1}: Tender247 ID truncated from ${String(row[index]).length} to 100 characters`)
+                    }
+                    break
+                  case 'gem_eprocure_id':
+                    // VARCHAR(100) - limit 100 characters
+                    if (value.length > 100) {
+                      value = value.substring(0, 100)
+                      console.warn(`Row ${i + 1}: GEM/Eprocure ID truncated from ${String(row[index]).length} to 100 characters`)
+                    }
+                    break
+                  case 'location':
+                    // VARCHAR(255) - limit 255 characters
+                    if (value.length > 255) {
+                      value = value.substring(0, 255)
+                      console.warn(`Row ${i + 1}: Location truncated from ${String(row[index]).length} to 255 characters`)
+                    }
+                    break
+                  case 'source':
+                    // VARCHAR(100) - limit 100 characters
+                    if (value.length > 100) {
+                      value = value.substring(0, 100)
+                      console.warn(`Row ${i + 1}: Source truncated from ${String(row[index]).length} to 100 characters`)
+                    }
+                    break
+                  case 'tender_type':
+                    // Assuming VARCHAR(100) - limit 100 characters (if exists in DB)
+                    if (value.length > 100) {
+                      value = value.substring(0, 100)
+                      console.warn(`Row ${i + 1}: Tender Type truncated from ${String(row[index]).length} to 100 characters`)
+                    }
+                    break
+                  case 'portal_link':
+                    // TEXT - no strict limit, but limit to 2000 characters for practical purposes
+                    if (value.length > 2000) {
+                      value = value.substring(0, 2000)
+                      console.warn(`Row ${i + 1}: Portal Link truncated from ${String(row[index]).length} to 2000 characters`)
+                    }
+                    break
+                  case 'tender_notes':
+                    // TEXT - no strict limit, but limit to 10000 characters for practical purposes
+                    if (value.length > 10000) {
+                      value = value.substring(0, 10000)
+                      console.warn(`Row ${i + 1}: Tender Notes truncated from ${String(row[index]).length} to 10000 characters`)
+                    }
+                    break
+                  case 'pq_criteria':
+                    // TEXT - no strict limit, but limit to 10000 characters for practical purposes
+                    if (value.length > 10000) {
+                      value = value.substring(0, 10000)
+                      console.warn(`Row ${i + 1}: PQ Criteria truncated from ${String(row[index]).length} to 10000 characters`)
+                    }
+                    break
+                  // Other fields don't have strict limits or are handled separately
+                }
                 tenderData[fieldName] = value
               }
             }
@@ -1665,7 +1737,7 @@ export default function Tenders() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
             <Input
-              placeholder="Search by Tender247 ID & Name"
+              placeholder="Search by Tender247 ID, Name & GEM/Eprocure ID"
               icon="ri-search-line"
               value={filters.search}
               onChange={(e) => {
