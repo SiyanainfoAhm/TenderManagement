@@ -84,6 +84,139 @@ export const tenderService = {
     }))
   },
 
+  // Get tenders with dynamic filters (all filtering done on DB side)
+  async getTendersWithFilters(
+    companyId: string,
+    filters?: {
+      search?: string
+      status?: string
+      source?: string
+      assignedTo?: string
+      city?: string
+      msmeExempted?: boolean
+      startupExempted?: boolean
+      timeFilter?: 'all' | 'today' | 'this_week' | 'last_week' | 'custom'
+      customStartDate?: string
+      customEndDate?: string
+    }
+  ): Promise<TenderWithUser[]> {
+    console.log('getTendersWithFilters called with filters:', filters)
+    
+    let query = supabase
+      .from(getTableName('tenders'))
+      .select(`
+        *,
+        assigned_user:tender1_users!tender1_tenders_assigned_to_fkey(full_name),
+        created_user:tender1_users!tender1_tenders_created_by_fkey(full_name)
+      `)
+      .eq('company_id', companyId)
+
+    // Search filter - search in tender_name, tender247_id, and gem_eprocure_id
+    if (filters?.search && filters.search.trim() !== '') {
+      const searchTerm = filters.search.trim()
+      console.log('✓ Applying search filter:', searchTerm)
+      query = query.or(`tender_name.ilike.%${searchTerm}%,tender247_id.ilike.%${searchTerm}%,gem_eprocure_id.ilike.%${searchTerm}%`)
+    }
+
+    if (filters?.status && filters.status.trim() !== '') {
+      console.log('✓ Applying status filter:', filters.status)
+      query = query.eq('status', filters.status)
+    }
+    if (filters?.source && filters.source.trim() !== '') {
+      console.log('✓ Applying source filter:', filters.source)
+      query = query.eq('source', filters.source)
+    }
+    if (filters?.assignedTo && filters.assignedTo.trim() !== '') {
+      console.log('✓ Applying assignedTo filter:', filters.assignedTo)
+      query = query.eq('assigned_to', filters.assignedTo)
+    }
+    if (filters?.city && filters.city.trim() !== '') {
+      console.log('✓ Applying city filter:', filters.city)
+      query = query.ilike('location', `%${filters.city}%`)
+    }
+    if (filters?.msmeExempted === true) {
+      console.log('✓ Applying MSME exempted filter: true')
+      query = query.eq('msme_exempted', true)
+    }
+    if (filters?.startupExempted === true) {
+      console.log('✓ Applying startup exempted filter: true')
+      query = query.eq('startup_exempted', true)
+    }
+
+    // Time filter based on created_at
+    if (filters?.timeFilter && filters.timeFilter !== 'all') {
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      
+      let startDate: Date | undefined
+      let endDate: Date | undefined
+
+      switch (filters.timeFilter) {
+        case 'today':
+          startDate = today
+          endDate = new Date(today.getTime() + 24 * 60 * 60 * 1000 - 1)
+          break
+        case 'this_week':
+          startDate = new Date(today)
+          startDate.setDate(today.getDate() - today.getDay()) // Sunday
+          endDate = new Date(startDate)
+          endDate.setDate(startDate.getDate() + 7)
+          break
+        case 'last_week':
+          startDate = new Date(today)
+          startDate.setDate(today.getDate() - today.getDay() - 7)
+          endDate = new Date(startDate)
+          endDate.setDate(startDate.getDate() + 7)
+          break
+        case 'custom':
+          if (filters.customStartDate && filters.customEndDate) {
+            startDate = new Date(filters.customStartDate)
+            startDate.setHours(0, 0, 0, 0) // Start of day
+            endDate = new Date(filters.customEndDate)
+            endDate.setHours(23, 59, 59, 999) // End of day
+          } else if (filters.customStartDate) {
+            // If only start date is provided, use it as both start and end
+            startDate = new Date(filters.customStartDate)
+            startDate.setHours(0, 0, 0, 0)
+            endDate = new Date(filters.customStartDate)
+            endDate.setHours(23, 59, 59, 999)
+          } else if (filters.customEndDate) {
+            // If only end date is provided, use it as both start and end
+            startDate = new Date(filters.customEndDate)
+            startDate.setHours(0, 0, 0, 0)
+            endDate = new Date(filters.customEndDate)
+            endDate.setHours(23, 59, 59, 999)
+          }
+          break
+      }
+
+      if (startDate && endDate) {
+        console.log(`✓ Applying time filter: ${filters.timeFilter} from ${startDate.toISOString()} to ${endDate.toISOString()}`)
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+    }
+
+    query = query.order('created_at', { ascending: false })
+
+    const { data, error } = await query
+
+    if (error) {
+      console.error('Error fetching tenders with filters:', error)
+      throw new Error(error.message || 'Failed to fetch tenders with filters')
+    }
+
+    const resultCount = data?.length || 0
+    console.log(`✅ getTendersWithFilters returned ${resultCount} tenders`)
+    
+    return (data || []).map(tender => ({
+      ...tender,
+      assigned_user_name: tender.assigned_user?.full_name,
+      created_user_name: tender.created_user?.full_name
+    }))
+  },
+
   // Get tenders for timeline (with date filtering - only tenders with expected_start_date and expected_end_date)
   async getTendersForTimeline(companyId: string, filters?: { startDate?: string; endDate?: string }): Promise<TenderWithUser[]> {
     let query = supabase
@@ -400,24 +533,24 @@ export const tenderService = {
 
   // Get status counts for dashboard
   async getStatusCounts(companyId: string, startDate?: string, endDate?: string): Promise<Record<string, number>> {
-    // Build date constraints
+    // Build date constraints - if no dates provided, fetch ALL data (no date filtering)
     let sinceISO: string | undefined
     let untilISO: string | undefined
     if (startDate && endDate) {
       sinceISO = new Date(startDate + 'T00:00:00.000Z').toISOString()
       untilISO = new Date(endDate + 'T23:59:59.999Z').toISOString()
-    } else {
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-      sinceISO = thirtyDaysAgo.toISOString()
     }
+    // If no dates provided, don't set sinceISO/untilISO - fetch all data
 
     let query = supabase
       .from(getTableName('tenders'))
       .select('status, created_at')
       .eq('company_id', companyId)
-      .gte('created_at', sinceISO as string)
 
+    // Only apply date filters if dates are provided
+    if (sinceISO) {
+      query = query.gte('created_at', sinceISO)
+    }
     if (untilISO) {
       query = query.lte('created_at', untilISO)
     }

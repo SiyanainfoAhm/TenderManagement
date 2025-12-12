@@ -41,7 +41,7 @@ export default function Tenders() {
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, errors: [] as string[] })
 
-  // Filter states
+  // Filter states (pending - not yet applied)
   const [filters, setFilters] = useState({
     search: '',
     status: '',
@@ -52,10 +52,26 @@ export default function Tenders() {
     startupExempted: false
   })
 
-  // Time filter states
-  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('today')
+  // Applied filters (used for API calls)
+  const [appliedFilters, setAppliedFilters] = useState({
+    search: '',
+    status: '',
+    source: '',
+    assignedTo: '',
+    city: '',
+    msmeExempted: false,
+    startupExempted: false
+  })
+
+  // Time filter states (pending)
+  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('all')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
+
+  // Applied time filter states
+  const [appliedTimeFilter, setAppliedTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('all')
+  const [appliedCustomStartDate, setAppliedCustomStartDate] = useState('')
+  const [appliedCustomEndDate, setAppliedCustomEndDate] = useState('')
 
   // Sorting states
   const [sortField, setSortField] = useState<string>('created_at')
@@ -141,19 +157,83 @@ export default function Tenders() {
     }
   }, [editingStatusId])
 
-  const loadData = async () => {
+  const loadData = async (filterParamsOverride?: any) => {
     if (!user || !selectedCompany) return
 
     try {
       setLoading(true)
+      
+      // Prepare filter parameters dynamically - only include filters that have values
+      let filterParams: any = undefined
+      
+      // If filterParamsOverride is provided, use it directly (for immediate filter application)
+      // Otherwise, use appliedFilters state (for useEffect-triggered loads)
+      if (filterParamsOverride !== undefined) {
+        filterParams = filterParamsOverride
+      } else {
+        // Check if any filters are applied
+        // By default, all filters are empty/false/'all', so hasFilters will be false
+        // This means filterParams remains undefined and getTenders() is called (fetches ALL data)
+        const hasFilters = appliedFilters.search?.trim() || 
+                          appliedFilters.status?.trim() || 
+                          appliedFilters.source?.trim() || 
+                          appliedFilters.assignedTo?.trim() || 
+                          appliedFilters.city?.trim() || 
+                          appliedFilters.msmeExempted || 
+                          appliedFilters.startupExempted ||
+                          (appliedTimeFilter && appliedTimeFilter !== 'all')
+        
+        // Only build filterParams if there are actual filters to apply
+        // If no filters, filterParams stays undefined and all data is fetched
+        if (hasFilters) {
+          filterParams = {}
+          
+          if (appliedFilters.search && appliedFilters.search.trim() !== '') {
+            filterParams.search = appliedFilters.search.trim()
+          }
+          if (appliedFilters.status && appliedFilters.status.trim() !== '') {
+            filterParams.status = appliedFilters.status
+          }
+          if (appliedFilters.source && appliedFilters.source.trim() !== '') {
+            filterParams.source = appliedFilters.source
+          }
+          if (appliedFilters.assignedTo && appliedFilters.assignedTo.trim() !== '') {
+            filterParams.assignedTo = appliedFilters.assignedTo
+          }
+          if (appliedFilters.city && appliedFilters.city.trim() !== '') {
+            filterParams.city = appliedFilters.city
+          }
+          if (appliedFilters.msmeExempted === true) {
+            filterParams.msmeExempted = true
+          }
+          if (appliedFilters.startupExempted === true) {
+            filterParams.startupExempted = true
+          }
+          
+          if (appliedTimeFilter && appliedTimeFilter !== 'all') {
+            filterParams.timeFilter = appliedTimeFilter
+            if (appliedTimeFilter === 'custom') {
+              if (appliedCustomStartDate && appliedCustomStartDate.trim() !== '') {
+                filterParams.customStartDate = appliedCustomStartDate
+              }
+              if (appliedCustomEndDate && appliedCustomEndDate.trim() !== '') {
+                filterParams.customEndDate = appliedCustomEndDate
+              }
+            }
+          }
+        }
+      }
+
+      console.log('loadData called - filterParams:', filterParams)
+
       const [tendersData, usersData] = await Promise.all([
-        tenderService.getTenders(selectedCompany.company_id),
+        filterParams && Object.keys(filterParams).length > 0
+          ? tenderService.getTendersWithFilters(selectedCompany.company_id, filterParams)
+          : tenderService.getTenders(selectedCompany.company_id),
         userService.getCompanyUsers(selectedCompany.company_id)
       ])
-      console.log('Loaded users for company:', selectedCompany.company_name)
-      console.log('Total users:', usersData.length)
-      console.log('Active users:', usersData.filter(u => u.is_active).length)
-      console.log('Users:', usersData)
+      
+      console.log('Loaded tenders:', tendersData.length)
       
       setTenders(tendersData)
       setUsers(usersData.filter(u => u.is_active))
@@ -895,42 +975,6 @@ export default function Tenders() {
     }
   }
 
-  // Helper function to get date range based on time filter
-  const getDateRange = () => {
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    
-    switch (timeFilter) {
-      case 'today':
-        return { start: today, end: new Date(today.getTime() + 24 * 60 * 60 * 1000 - 1) }
-      
-      case 'this_week':
-        const startOfWeek = new Date(today)
-        startOfWeek.setDate(today.getDate() - today.getDay()) // Sunday
-        const endOfWeek = new Date(startOfWeek)
-        endOfWeek.setDate(startOfWeek.getDate() + 7)
-        return { start: startOfWeek, end: endOfWeek }
-      
-      case 'last_week':
-        const lastWeekStart = new Date(today)
-        lastWeekStart.setDate(today.getDate() - today.getDay() - 7)
-        const lastWeekEnd = new Date(lastWeekStart)
-        lastWeekEnd.setDate(lastWeekStart.getDate() + 7)
-        return { start: lastWeekStart, end: lastWeekEnd }
-      
-      case 'custom':
-        if (customStartDate && customEndDate) {
-          return {
-            start: new Date(customStartDate),
-            end: new Date(customEndDate + 'T23:59:59')
-          }
-        }
-        return null
-      
-      default:
-        return null
-    }
-  }
 
   // Handle column sort
   const handleSort = (field: string) => {
@@ -972,41 +1016,15 @@ export default function Tenders() {
     </th>
   )
 
-  // Filter and sort tenders
+  // IMPORTANT: All filtering is done on the database side via API
+  // This memo ONLY handles client-side sorting for fast UI response
+  // NO client-side filtering happens here - all filters (search, status, source, 
+  // assignedTo, city, MSME/Startup exemptions, and date filters) are applied in the database
   const filteredTenders = useMemo(() => {
-    // First, filter the tenders
-    const filtered = tenders.filter(tender => {
-      const matchesSearch = !filters.search || 
-        tender.tender_name.toLowerCase().includes(filters.search.toLowerCase()) ||
-        tender.tender247_id?.toLowerCase().includes(filters.search.toLowerCase())
-      
-      const matchesStatus = !filters.status || tender.status === filters.status
-      const matchesSource = !filters.source || tender.source === filters.source
-      const matchesAssignedTo = !filters.assignedTo || tender.assigned_to === filters.assignedTo
-      const matchesCity = !filters.city || tender.location?.toLowerCase().includes(filters.city.toLowerCase())
-      const matchesMsme = !filters.msmeExempted || tender.msme_exempted === true
-      const matchesStartup = !filters.startupExempted || tender.startup_exempted === true
-
-      // Time filter based on created_at (tender creation date)
-      let matchesTimeFilter = true
-      if (timeFilter !== 'all') {
-        const dateRange = getDateRange()
-        if (dateRange && tender.created_at) {
-          const tenderDate = new Date(tender.created_at)
-          matchesTimeFilter = tenderDate >= dateRange.start && tenderDate <= dateRange.end
-        } else if (timeFilter === 'custom') {
-          matchesTimeFilter = false // No valid custom range selected
-        } else {
-          // If no created_at date, exclude from filtered results
-          matchesTimeFilter = false
-        }
-      }
-
-      return matchesSearch && matchesStatus && matchesSource && matchesAssignedTo && matchesCity && matchesMsme && matchesStartup && matchesTimeFilter
-    })
-
-    // Then, sort the filtered results
-    return filtered.sort((a, b) => {
+    // All filtering is done on the database side via API
+    // Only sorting is done client-side for fast response
+    // The 'tenders' array already contains only the filtered results from the API
+    return [...tenders].sort((a, b) => {
       let aValue: any = a[sortField as keyof typeof a]
       let bValue: any = b[sortField as keyof typeof b]
 
@@ -1046,7 +1064,7 @@ export default function Tenders() {
       if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
       return 0
     })
-  }, [tenders, filters, timeFilter, customStartDate, customEndDate, sortField, sortDirection])
+  }, [tenders, sortField, sortDirection])
 
   const totalPages = Math.ceil(filteredTenders.length / itemsPerPage)
   const currentTenders = filteredTenders.slice(
@@ -1151,6 +1169,63 @@ export default function Tenders() {
     ]
   }, [tenders])
 
+  const handleApplyFilters = () => {
+    // Prepare filter parameters from current pending filters
+    const filterParams: any = {}
+    
+    if (filters.search && filters.search.trim() !== '') {
+      filterParams.search = filters.search.trim()
+    }
+    if (filters.status && filters.status.trim() !== '') {
+      filterParams.status = filters.status
+    }
+    if (filters.source && filters.source.trim() !== '') {
+      filterParams.source = filters.source
+    }
+    if (filters.assignedTo && filters.assignedTo.trim() !== '') {
+      filterParams.assignedTo = filters.assignedTo
+    }
+    if (filters.city && filters.city.trim() !== '') {
+      filterParams.city = filters.city
+    }
+    if (filters.msmeExempted === true) {
+      filterParams.msmeExempted = true
+    }
+    if (filters.startupExempted === true) {
+      filterParams.startupExempted = true
+    }
+    
+    if (timeFilter && timeFilter !== 'all') {
+      filterParams.timeFilter = timeFilter
+      if (timeFilter === 'custom') {
+        if (customStartDate && customStartDate.trim() !== '') {
+          filterParams.customStartDate = customStartDate
+        }
+        if (customEndDate && customEndDate.trim() !== '') {
+          filterParams.customEndDate = customEndDate
+        }
+      }
+    }
+    
+    // Apply pending filters to applied filters state (for future useEffect-triggered loads)
+    setAppliedFilters({
+      search: filters.search,
+      status: filters.status,
+      source: filters.source,
+      assignedTo: filters.assignedTo,
+      city: filters.city,
+      msmeExempted: filters.msmeExempted,
+      startupExempted: filters.startupExempted
+    })
+    setAppliedTimeFilter(timeFilter)
+    setAppliedCustomStartDate(customStartDate)
+    setAppliedCustomEndDate(customEndDate)
+    setCurrentPage(1)
+    
+    // Reload data with filters immediately (pass filterParams directly to avoid state timing issues)
+    loadData(Object.keys(filterParams).length > 0 ? filterParams : undefined)
+  }
+
   const handleClearFilters = () => {
     setFilters({
       search: '',
@@ -1161,10 +1236,24 @@ export default function Tenders() {
       msmeExempted: false,
       startupExempted: false
     })
-    setTimeFilter('today')
+    setTimeFilter('all')
     setCustomStartDate('')
     setCustomEndDate('')
+    // Clear applied filters
+    setAppliedFilters({
+      search: '',
+      status: '',
+      source: '',
+      assignedTo: '',
+      city: '',
+      msmeExempted: false,
+      startupExempted: false
+    })
+    setAppliedTimeFilter('all')
+    setAppliedCustomStartDate('')
+    setAppliedCustomEndDate('')
     setCurrentPage(1)
+    loadData(undefined) // Load all data without filters
   }
 
   const statusOptions = [
@@ -1556,14 +1645,17 @@ export default function Tenders() {
               value={filters.search}
               onChange={(e) => {
                 setFilters({ ...filters, search: e.target.value })
-                setCurrentPage(1)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleApplyFilters()
+                }
               }}
             />
             <Select
               value={filters.status}
               onChange={(e) => {
                 setFilters({ ...filters, status: e.target.value })
-                setCurrentPage(1)
               }}
               options={statusOptions}
             />
@@ -1571,7 +1663,6 @@ export default function Tenders() {
               value={timeFilter}
               onChange={(e) => {
                 setTimeFilter(e.target.value as any)
-                setCurrentPage(1)
               }}
               options={[
                 { value: 'all', label: 'All Time' },
@@ -1585,7 +1676,6 @@ export default function Tenders() {
               value={filters.assignedTo}
               onChange={(e) => {
                 setFilters({ ...filters, assignedTo: e.target.value })
-                setCurrentPage(1)
               }}
               options={[
                 { value: '', label: 'All Assigned' },
@@ -1601,7 +1691,11 @@ export default function Tenders() {
               value={filters.city}
               onChange={(e) => {
                 setFilters({ ...filters, city: e.target.value })
-                setCurrentPage(1)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleApplyFilters()
+                }
               }}
             />
             <div className="flex items-center gap-4">
@@ -1611,7 +1705,6 @@ export default function Tenders() {
                   checked={filters.msmeExempted}
                   onChange={(e) => {
                     setFilters({ ...filters, msmeExempted: e.target.checked })
-                    setCurrentPage(1)
                   }}
                   className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
@@ -1625,18 +1718,24 @@ export default function Tenders() {
                   checked={filters.startupExempted}
                   onChange={(e) => {
                     setFilters({ ...filters, startupExempted: e.target.checked })
-                    setCurrentPage(1)
                   }}
                   className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
                 <span className="text-sm text-gray-700">Startup Exemption</span>
               </label>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleApplyFilters}
+                className="flex-1"
+              >
+                <i className="ri-filter-line mr-2"></i>
+                Apply Filter
+              </Button>
               <Button
                 onClick={handleClearFilters}
                 variant="outline"
-                className="w-full"
+                className="flex-1"
               >
                 <i className="ri-filter-off-line mr-2"></i>
                 Clear Filter

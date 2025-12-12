@@ -33,16 +33,11 @@ export default function Dashboard() {
   const [tenderModalAttachmentsLoading, setTenderModalAttachmentsLoading] = useState(false)
   const [tenderModalAttachmentsError, setTenderModalAttachmentsError] = useState<string | null>(null)
 
-  // Date range filter (default last 30 days)
-  const today = new Date()
-  const defaultEnd = today.toISOString().split('T')[0]
-  const d30 = new Date()
-  d30.setDate(today.getDate() - 30)
-  const defaultStart = d30.toISOString().split('T')[0]
-  const [filterStartDate, setFilterStartDate] = useState<string>(defaultStart)
-  const [filterEndDate, setFilterEndDate] = useState<string>(defaultEnd)
-  const [appliedStartDate, setAppliedStartDate] = useState<string>(defaultStart)
-  const [appliedEndDate, setAppliedEndDate] = useState<string>(defaultEnd)
+  // Date range filter (default: no filter - fetch all data)
+  const [filterStartDate, setFilterStartDate] = useState<string>('')
+  const [filterEndDate, setFilterEndDate] = useState<string>('')
+  const [appliedStartDate, setAppliedStartDate] = useState<string>('')
+  const [appliedEndDate, setAppliedEndDate] = useState<string>('')
   const [showDateFilter, setShowDateFilter] = useState(false)
   const [dateError, setDateError] = useState<string | null>(null)
 
@@ -109,13 +104,19 @@ export default function Dashboard() {
 
     try {
       setLoading(true)
-      const effectiveStart = rangeStart ?? appliedStartDate
-      const effectiveEnd = rangeEnd ?? appliedEndDate
+      // Use provided dates, or fall back to applied dates, or undefined if empty (no filter)
+      const effectiveStart = rangeStart ?? (appliedStartDate || undefined)
+      const effectiveEnd = rangeEnd ?? (appliedEndDate || undefined)
+      
+      // Only pass dates if both are provided and not empty
+      const startDate = effectiveStart && effectiveStart.trim() !== '' ? effectiveStart : undefined
+      const endDate = effectiveEnd && effectiveEnd.trim() !== '' ? effectiveEnd : undefined
+      
       const [statsData, deadlinesData, statusCountsData] = await Promise.all([
-        dashboardService.getCompanyStats(selectedCompany.company_id, effectiveStart, effectiveEnd),
+        dashboardService.getCompanyStats(selectedCompany.company_id, startDate, endDate),
         // Upcoming deadlines should always show next 7 days (not filtered by date range)
         tenderService.getUpcomingDeadlines(selectedCompany.company_id, 7),
-        tenderService.getStatusCounts(selectedCompany.company_id, effectiveStart, effectiveEnd)
+        tenderService.getStatusCounts(selectedCompany.company_id, startDate, endDate)
       ])
 
       setStats(statsData)

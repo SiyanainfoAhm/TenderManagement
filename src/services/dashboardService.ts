@@ -4,32 +4,70 @@ import { getFunctionName, getTableName } from '@/config/database'
 
 export const dashboardService = {
   // Get dashboard statistics for a company (supports optional date range)
+  // If no date range is provided, fetches ALL data (no date filtering)
   async getCompanyStats(companyId: string, startDate?: string, endDate?: string): Promise<DashboardStats> {
-    // If no date range passed, use RPC (which defaults to last 30 days per DB function)
+    // If no date range passed, fetch ALL data (no date filtering)
     if (!startDate || !endDate) {
-      const { data, error } = await supabase.rpc(getFunctionName('get_company_stats'), {
-        p_company_id: companyId
-      })
+      // Total tenders (all time)
+      const totalQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
 
+      // Submitted (all time)
+      const submittedQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .eq('status', 'submitted')
+
+      // Not-bidding (all time)
+      const notBiddingQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .eq('status', 'not-bidding')
+
+      // Active users (not date-bound)
+      const activeUsersQuery = supabase
+        .from(getTableName('user_companies'))
+        .select('user_id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+
+      // Upcoming deadlines (next 7 days, not date-bound for filtering)
+      const activeStatuses = ['assigned', 'under-study', 'on-hold', 'will-bid', 'pre-bid', 'wait-for-corrigendum', 'in-preparation', 'ready-to-submit']
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const next7Days = new Date()
+      next7Days.setDate(today.getDate() + 7)
+      next7Days.setHours(23, 59, 59, 999)
+      
+      const upcomingQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .in('status', activeStatuses)
+        .gte('last_date', today.toISOString())
+        .lte('last_date', next7Days.toISOString())
+
+      const [totalRes, submittedRes, notBidRes, activeUsersRes, upcomingRes] = await Promise.all([
+        totalQuery,
+        submittedQuery,
+        notBiddingQuery,
+        activeUsersQuery,
+        upcomingQuery
+      ])
+
+      const error = totalRes.error || submittedRes.error || notBidRes.error || activeUsersRes.error || upcomingRes.error
       if (error) throw new Error(error.message || 'Failed to fetch statistics')
 
-      if (!data || data.length === 0) {
-        return {
-          total_tenders: 0,
-          submitted_bids: 0,
-          not_bidding: 0,
-          active_users: 0,
-          upcoming_deadlines: 0
-        }
-      }
-
-      const stats = data[0]
       return {
-        total_tenders: Number(stats.total_tenders) || 0,
-        submitted_bids: Number(stats.submitted_bids) || 0,
-        not_bidding: Number(stats.not_bidding) || 0,
-        active_users: Number(stats.active_users) || 0,
-        upcoming_deadlines: Number(stats.upcoming_deadlines) || 0
+        total_tenders: totalRes.count || 0,
+        submitted_bids: submittedRes.count || 0,
+        not_bidding: notBidRes.count || 0,
+        active_users: activeUsersRes.count || 0,
+        upcoming_deadlines: upcomingRes.count || 0
       }
     }
 
