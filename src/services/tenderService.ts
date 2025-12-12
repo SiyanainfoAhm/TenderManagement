@@ -292,6 +292,43 @@ export const tenderService = {
     }
   },
 
+  // Get all tender IDs for batch duplicate checking (optimized for Excel import)
+  async getAllTenderIds(companyId: string): Promise<{
+    tender247Ids: Map<string, string>, // Map<normalized_id, original_id>
+    gemEprocureIds: Map<string, string> // Map<normalized_id, original_id>
+  }> {
+    const { data, error } = await supabase
+      .from(getTableName('tenders'))
+      .select('tender247_id, gem_eprocure_id')
+      .eq('company_id', companyId)
+
+    if (error) {
+      throw new Error(error.message || 'Failed to fetch tender IDs')
+    }
+
+    const tender247Ids = new Map<string, string>()
+    const gemEprocureIds = new Map<string, string>()
+
+    if (data) {
+      data.forEach((tender) => {
+        if (tender.tender247_id) {
+          const normalized = tender.tender247_id.trim().toLowerCase()
+          if (normalized) {
+            tender247Ids.set(normalized, tender.tender247_id)
+          }
+        }
+        if (tender.gem_eprocure_id) {
+          const normalized = tender.gem_eprocure_id.trim().toLowerCase()
+          if (normalized) {
+            gemEprocureIds.set(normalized, tender.gem_eprocure_id)
+          }
+        }
+      })
+    }
+
+    return { tender247Ids, gemEprocureIds }
+  },
+
   // Check if Tender247 ID or GEM/Eprocure ID already exists (case-insensitive)
   async checkDuplicateIds(
     companyId: string,
@@ -359,6 +396,38 @@ export const tenderService = {
     return { isDuplicate: false, message: '' }
   },
 
+  // Check duplicates in memory (optimized for batch processing)
+  checkDuplicatesInMemory(
+    tender247Id: string | undefined,
+    gemEprocureId: string | undefined,
+    existingIds: { tender247Ids: Map<string, string>; gemEprocureIds: Map<string, string> }
+  ): { isDuplicate: boolean; message: string } {
+    const messages: string[] = []
+
+    if (tender247Id) {
+      const normalized = tender247Id.trim().toLowerCase()
+      if (normalized && existingIds.tender247Ids.has(normalized)) {
+        messages.push(`Tender247 ID "${tender247Id.trim()}" already exists`)
+      }
+    }
+
+    if (gemEprocureId) {
+      const normalized = gemEprocureId.trim().toLowerCase()
+      if (normalized && existingIds.gemEprocureIds.has(normalized)) {
+        messages.push(`GEM/Eprocure ID "${gemEprocureId.trim()}" already exists`)
+      }
+    }
+
+    if (messages.length > 0) {
+      return {
+        isDuplicate: true,
+        message: messages.join(' and ')
+      }
+    }
+
+    return { isDuplicate: false, message: '' }
+  },
+
   // Create new tender
   async createTender(companyId: string, userId: string, formData: TenderFormData): Promise<Tender> {
     // Validate assigned_to is a valid UUID or empty
@@ -407,6 +476,105 @@ export const tenderService = {
     // Bid fees should only be created from the Bid Fees page
 
     return data
+  },
+
+  // Create multiple tenders in batch (optimized for Excel import)
+  async createTendersBatch(
+    companyId: string,
+    userId: string,
+    tenders: TenderFormData[]
+  ): Promise<{ success: Tender[]; errors: Array<{ index: number; error: string }> }> {
+    const success: Tender[] = []
+    const errors: Array<{ index: number; error: string }> = []
+
+    // Prepare all tender data
+    const tenderDataArray = tenders.map((formData) => {
+      const assignedTo = formData.assigned_to && formData.assigned_to.trim() !== '' 
+        ? formData.assigned_to 
+        : null
+      
+      return {
+        company_id: companyId,
+        tender247_id: formData.tender247_id || null,
+        gem_eprocure_id: formData.gem_eprocure_id || null,
+        portal_link: formData.portal_link || null,
+        tender_name: formData.tender_name,
+        source: formData.source || null,
+        tender_type: formData.tender_type || null,
+        location: formData.location || null,
+        last_date: formData.last_date || null,
+        expected_start_date: formData.expected_start_date || null,
+        expected_end_date: formData.expected_end_date || null,
+        expected_days: formData.expected_days !== undefined && formData.expected_days !== null && formData.expected_days !== ''
+          ? (Number.isNaN(parseInt(formData.expected_days, 10)) ? null : parseInt(formData.expected_days, 10))
+          : null,
+        msme_exempted: formData.msme_exempted,
+        startup_exempted: formData.startup_exempted,
+        emd_amount: parseFloat(formData.emd_amount) || 0,
+        tender_fees: parseFloat(formData.tender_fees) || 0,
+        tender_cost: parseFloat(formData.tender_cost) || 0,
+        tender_notes: formData.tender_notes || null,
+        pq_criteria: formData.pq_criteria || null,
+        status: formData.status,
+        assigned_to: assignedTo,
+        not_bidding_reason: formData.not_bidding_reason || null,
+        created_by: userId,
+        status_updated_date: new Date().toISOString()
+      }
+    })
+
+    // Insert in batches (Supabase has limits, so we'll do 50 at a time)
+    const BATCH_SIZE = 50
+    for (let i = 0; i < tenderDataArray.length; i += BATCH_SIZE) {
+      const batch = tenderDataArray.slice(i, i + BATCH_SIZE)
+      const batchStartIndex = i
+
+      try {
+        const { data, error } = await supabase
+          .from(getTableName('tenders'))
+          .insert(batch)
+          .select()
+
+        if (error) {
+          // If batch fails, try individual inserts to identify which ones failed
+          for (let j = 0; j < batch.length; j++) {
+            try {
+              const { data: singleData, error: singleError } = await supabase
+                .from(getTableName('tenders'))
+                .insert(batch[j])
+                .select()
+                .single()
+
+              if (singleError) {
+                errors.push({
+                  index: batchStartIndex + j,
+                  error: singleError.message || 'Failed to create tender'
+                })
+              } else if (singleData) {
+                success.push(singleData)
+              }
+            } catch (singleErr: any) {
+              errors.push({
+                index: batchStartIndex + j,
+                error: singleErr.message || 'Failed to create tender'
+              })
+            }
+          }
+        } else if (data) {
+          success.push(...data)
+        }
+      } catch (batchErr: any) {
+        // If batch insert fails completely, mark all as errors
+        for (let j = 0; j < batch.length; j++) {
+          errors.push({
+            index: batchStartIndex + j,
+            error: batchErr.message || 'Failed to create tender in batch'
+          })
+        }
+      }
+    }
+
+    return { success, errors }
   },
 
   // Update tender

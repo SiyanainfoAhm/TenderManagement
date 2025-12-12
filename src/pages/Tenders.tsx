@@ -14,6 +14,15 @@ import BulletTextArea from '@/components/base/BulletTextArea'
 import Modal from '@/components/base/Modal'
 import Badge from '@/components/base/Badge'
 import * as XLSX from 'xlsx'
+import {
+  truncateField,
+  parseBoolean,
+  validateTenderName,
+  validateDate,
+  validateAmount,
+  validateStatus,
+  validateSource
+} from '@/utils/excelImportHelpers'
 
 export default function Tenders() {
   const { user, selectedCompany } = useAuth()
@@ -841,8 +850,20 @@ export default function Tenders() {
         return
       }
 
+      // OPTIMIZATION 1: Create user lookup Map for O(1) access
+      const userMap = new Map<string, string>() // Map<normalized_email_or_name, user_id>
+      users.forEach(u => {
+        if (u.email) {
+          userMap.set(u.email.toLowerCase(), u.user_id)
+        }
+        if (u.full_name) {
+          userMap.set(u.full_name.toLowerCase(), u.user_id)
+        }
+      })
+
       // Process data rows
       const errors: string[] = []
+      const warnings: string[] = []
       const tendersToImport: TenderFormData[] = []
       
       for (let i = 1; i < data.length; i++) {
@@ -850,6 +871,7 @@ export default function Tenders() {
         if (!row || row.every((cell: any) => !cell)) continue // Skip empty rows
 
         try {
+          const rowNumber = i + 1
           const tenderData: any = {
             tender_name: '',
             msme_exempted: false,
@@ -873,109 +895,110 @@ export default function Tenders() {
             pq_criteria: ''
           }
 
-          // Map row data to tender fields with length limits
-          // Database column limits:
-          // tender_name: VARCHAR(500), tender247_id: VARCHAR(100), gem_eprocure_id: VARCHAR(100)
-          // location: VARCHAR(255), source: VARCHAR(100), portal_link: TEXT (unlimited but reasonable)
-          // tender_notes: TEXT, pq_criteria: TEXT
+          // PHASE 2: Map row data to tender fields with validation and truncation (config-driven)
           headers.forEach((header, index) => {
             const fieldName = headerMap[header]
-            if (fieldName && row[index] !== undefined && row[index] !== null) {
-              let value = String(row[index]).trim()
-              
-              if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
-                tenderData[fieldName] = ['yes', 'y', 'true', '1'].includes(value.toLowerCase())
-              } else if (fieldName === 'assigned_to') {
-                // Try to find user by email or name
-                const user = users.find(u => 
-                  u.email?.toLowerCase() === value.toLowerCase() ||
-                  u.full_name?.toLowerCase() === value.toLowerCase()
-                )
-                tenderData[fieldName] = user?.user_id || ''
-              } else {
-                // Apply length limits based on database column constraints
-                // Truncate text if it exceeds the limit
-                switch (fieldName) {
-                  case 'tender_name':
-                    // VARCHAR(500) - limit 500 characters
-                    if (value.length > 500) {
-                      value = value.substring(0, 500)
-                      console.warn(`Row ${i + 1}: Tender Name truncated from ${String(row[index]).length} to 500 characters`)
-                    }
-                    break
-                  case 'tender247_id':
-                    // VARCHAR(100) - limit 100 characters
-                    if (value.length > 100) {
-                      value = value.substring(0, 100)
-                      console.warn(`Row ${i + 1}: Tender247 ID truncated from ${String(row[index]).length} to 100 characters`)
-                    }
-                    break
-                  case 'gem_eprocure_id':
-                    // VARCHAR(100) - limit 100 characters
-                    if (value.length > 100) {
-                      value = value.substring(0, 100)
-                      console.warn(`Row ${i + 1}: GEM/Eprocure ID truncated from ${String(row[index]).length} to 100 characters`)
-                    }
-                    break
-                  case 'location':
-                    // VARCHAR(255) - limit 255 characters
-                    if (value.length > 255) {
-                      value = value.substring(0, 255)
-                      console.warn(`Row ${i + 1}: Location truncated from ${String(row[index]).length} to 255 characters`)
-                    }
-                    break
-                  case 'source':
-                    // VARCHAR(100) - limit 100 characters
-                    if (value.length > 100) {
-                      value = value.substring(0, 100)
-                      console.warn(`Row ${i + 1}: Source truncated from ${String(row[index]).length} to 100 characters`)
-                    }
-                    break
-                  case 'tender_type':
-                    // Assuming VARCHAR(100) - limit 100 characters (if exists in DB)
-                    if (value.length > 100) {
-                      value = value.substring(0, 100)
-                      console.warn(`Row ${i + 1}: Tender Type truncated from ${String(row[index]).length} to 100 characters`)
-                    }
-                    break
-                  case 'portal_link':
-                    // TEXT - no strict limit, but limit to 2000 characters for practical purposes
-                    if (value.length > 2000) {
-                      value = value.substring(0, 2000)
-                      console.warn(`Row ${i + 1}: Portal Link truncated from ${String(row[index]).length} to 2000 characters`)
-                    }
-                    break
-                  case 'tender_notes':
-                    // TEXT - no strict limit, but limit to 10000 characters for practical purposes
-                    if (value.length > 10000) {
-                      value = value.substring(0, 10000)
-                      console.warn(`Row ${i + 1}: Tender Notes truncated from ${String(row[index]).length} to 10000 characters`)
-                    }
-                    break
-                  case 'pq_criteria':
-                    // TEXT - no strict limit, but limit to 10000 characters for practical purposes
-                    if (value.length > 10000) {
-                      value = value.substring(0, 10000)
-                      console.warn(`Row ${i + 1}: PQ Criteria truncated from ${String(row[index]).length} to 10000 characters`)
-                    }
-                    break
-                  // Other fields don't have strict limits or are handled separately
-                }
-                tenderData[fieldName] = value
-              }
+            if (!fieldName || row[index] === undefined || row[index] === null) return
+
+            const originalValue = String(row[index])
+            let value = originalValue.trim()
+            
+            // Handle boolean fields
+            if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
+              tenderData[fieldName] = parseBoolean(value)
+              return
             }
+
+            // Handle assigned_to field
+            if (fieldName === 'assigned_to') {
+              // OPTIMIZATION 1: Use Map for O(1) lookup instead of linear search
+              const userId = userMap.get(value.toLowerCase())
+              tenderData[fieldName] = userId || ''
+              if (value && !userId) {
+                warnings.push(`Row ${rowNumber}: User "${value}" not found for "Assigned To" field`)
+              }
+              return
+            }
+
+            // Handle date fields
+            if (fieldName === 'last_date' || fieldName === 'expected_start_date' || fieldName === 'expected_end_date') {
+              const dateValidation = validateDate(value, header)
+              if (!dateValidation.valid) {
+                errors.push(`Row ${rowNumber}: ${dateValidation.error}`)
+                return
+              }
+              if (dateValidation.warning) {
+                warnings.push(`Row ${rowNumber}: ${dateValidation.warning}`)
+              }
+              tenderData[fieldName] = dateValidation.normalizedValue || ''
+              return
+            }
+
+            // Handle amount fields
+            if (fieldName === 'emd_amount' || fieldName === 'tender_fees' || fieldName === 'tender_cost') {
+              const amountValidation = validateAmount(value, header)
+              if (!amountValidation.valid) {
+                errors.push(`Row ${rowNumber}: ${amountValidation.error}`)
+                return
+              }
+              tenderData[fieldName] = amountValidation.normalizedValue || '0'
+              return
+            }
+
+            // Handle status field
+            if (fieldName === 'status') {
+              const statusValidation = validateStatus(value)
+              if (!statusValidation.valid) {
+                errors.push(`Row ${rowNumber}: ${statusValidation.error}`)
+                return
+              }
+              tenderData[fieldName] = statusValidation.normalizedValue || 'new'
+              return
+            }
+
+            // Handle source field
+            if (fieldName === 'source') {
+              const sourceValidation = validateSource(value)
+              if (!sourceValidation.valid) {
+                errors.push(`Row ${rowNumber}: ${sourceValidation.error}`)
+                return
+              }
+              tenderData[fieldName] = sourceValidation.normalizedValue || ''
+              return
+            }
+
+            // PHASE 2: Handle text fields with config-driven truncation
+            const truncationResult = truncateField(fieldName, value, originalValue.length)
+            if (truncationResult.truncated && truncationResult.warning) {
+              warnings.push(`Row ${rowNumber}: ${truncationResult.warning}`)
+            }
+            tenderData[fieldName] = truncationResult.value
           })
 
-          // Validate required fields
-          if (!tenderData.tender_name) {
-            errors.push(`Row ${i + 1}: Tender Name is required`)
+          // PHASE 2: Validate required fields using validation function
+          const nameValidation = validateTenderName(tenderData.tender_name)
+          if (!nameValidation.valid) {
+            errors.push(`Row ${rowNumber}: ${nameValidation.error}`)
             continue
           }
+          tenderData.tender_name = nameValidation.normalizedValue || tenderData.tender_name
 
           tendersToImport.push(tenderData as TenderFormData)
         } catch (rowError: any) {
           errors.push(`Row ${i + 1}: ${rowError.message || 'Invalid data'}`)
         }
+      }
+
+      // PHASE 2: Log warnings separately (non-blocking)
+      if (warnings.length > 0) {
+        console.warn('Excel Import Warnings:', warnings)
+      }
+
+      // ALL-OR-NOTHING VALIDATION: Check if there are any validation errors
+      if (errors.length > 0) {
+        setError(`Validation failed. Please fix all errors before uploading. Errors (${errors.length}): ${errors.slice(0, 10).join('; ')}${errors.length > 10 ? ` ... and ${errors.length - 10} more errors.` : ''}`)
+        setImporting(false)
+        return
       }
 
       if (tendersToImport.length === 0) {
@@ -984,53 +1007,132 @@ export default function Tenders() {
         return
       }
 
-      // Import tenders
+      // OPTIMIZATION 2: Fetch all existing tender IDs once for batch duplicate checking
       setImportProgress({ current: 0, total: tendersToImport.length, errors: [] })
-      const importErrors: string[] = []
+      const existingIds = await tenderService.getAllTenderIds(selectedCompany.company_id)
+
+      // ALL-OR-NOTHING: Check ALL duplicates before uploading anything
+      const duplicateErrors: string[] = []
 
       for (let i = 0; i < tendersToImport.length; i++) {
-        try {
-          setImportProgress({ current: i + 1, total: tendersToImport.length, errors: importErrors })
-          
-          // Check for duplicate IDs
-          const duplicateCheck = await tenderService.checkDuplicateIds(
-            selectedCompany.company_id,
-            tendersToImport[i].tender247_id,
-            tendersToImport[i].gem_eprocure_id
-          )
+        const duplicateCheck = tenderService.checkDuplicatesInMemory(
+          tendersToImport[i].tender247_id,
+          tendersToImport[i].gem_eprocure_id,
+          existingIds
+        )
 
-          if (duplicateCheck.isDuplicate) {
-            importErrors.push(`Row ${i + 2}: ${duplicateCheck.message}`)
-            continue
-          }
-
-          // Create tender
-          await tenderService.createTender(
-            selectedCompany.company_id,
-            user.id,
-            tendersToImport[i]
-          )
-        } catch (importError: any) {
-          importErrors.push(`Row ${i + 2}: ${importError.message || 'Failed to import'}`)
+        if (duplicateCheck.isDuplicate) {
+          duplicateErrors.push(`Row ${i + 2}: ${duplicateCheck.message}`)
         }
       }
 
-      // Show results
-      const successCount = tendersToImport.length - importErrors.length
-      const allErrors = [...errors, ...importErrors]
-
-      if (allErrors.length > 0) {
-        setError(`Imported ${successCount} of ${tendersToImport.length} tenders. Errors: ${allErrors.join('; ')}`)
-      } else {
-        setError('')
+      // ALL-OR-NOTHING: If any duplicates found, don't upload anything
+      if (duplicateErrors.length > 0) {
+        setError(`Duplicate IDs found. Please fix all duplicates before uploading. Errors (${duplicateErrors.length}): ${duplicateErrors.slice(0, 10).join('; ')}${duplicateErrors.length > 10 ? ` ... and ${duplicateErrors.length - 10} more errors.` : ''}`)
+        setImporting(false)
+        return
       }
 
-      if (successCount > 0) {
-        await loadData()
-        setIsExcelUploadModalOpen(false)
-        setExcelFile(null)
-        setImportProgress({ current: 0, total: 0, errors: [] })
+      // ALL-OR-NOTHING: All validations passed, proceed with batch upload
+      setImportProgress({ current: 0, total: tendersToImport.length, errors: [] })
+      let lastProgressUpdate = 0
+      let lastProgressTime = Date.now()
+      const PROGRESS_UPDATE_INTERVAL = 100 // Update every 100ms
+      const PROGRESS_UPDATE_STEP = 10 // Or every 10 items
+      let totalSuccessCount = 0
+      const createdTenderIds: string[] = [] // Track all created tenders for rollback
+
+      // Process in batches
+      const BATCH_SIZE = 50
+
+      try {
+        for (let i = 0; i < tendersToImport.length; i += BATCH_SIZE) {
+          const batch = tendersToImport.slice(i, i + BATCH_SIZE)
+          const batchStartRow = i + 2 // +2 because row 1 is header, and we start from index 0
+          
+          const result = await tenderService.createTendersBatch(
+            selectedCompany.company_id,
+            user.id,
+            batch
+          )
+
+          // ALL-OR-NOTHING: If any batch insert fails, stop and rollback all
+          if (result.errors.length > 0) {
+            // Rollback: Delete all previously created tenders
+            for (const tenderId of createdTenderIds) {
+              try {
+                await tenderService.deleteTender(tenderId)
+              } catch (deleteError) {
+                console.error('Failed to rollback tender:', deleteError)
+              }
+            }
+            
+            // Stop import and show error
+            const errorMessages = result.errors.map(err => `Row ${batchStartRow + err.index}: ${err.error}`).join('; ')
+            setError(`Upload failed. All ${createdTenderIds.length} previously created tenders have been rolled back. Errors: ${errorMessages}`)
+            setImporting(false)
+            return
+          }
+
+          // Track successfully created tenders
+          result.success.forEach(tender => {
+            createdTenderIds.push(tender.id)
+          })
+          totalSuccessCount += result.success.length
+
+          // OPTIMIZATION 4: Throttle progress updates
+          const now = Date.now()
+          if (
+            totalSuccessCount - lastProgressUpdate >= PROGRESS_UPDATE_STEP ||
+            now - lastProgressTime >= PROGRESS_UPDATE_INTERVAL
+          ) {
+            setImportProgress({
+              current: totalSuccessCount,
+              total: tendersToImport.length,
+              errors: []
+            })
+            lastProgressUpdate = totalSuccessCount
+            lastProgressTime = now
+          }
+        }
+      } catch (batchError: any) {
+        // ALL-OR-NOTHING: If batch fails, rollback all created tenders and stop
+        for (const tenderId of createdTenderIds) {
+          try {
+            await tenderService.deleteTender(tenderId)
+          } catch (deleteError) {
+            console.error('Failed to rollback tender:', deleteError)
+          }
+        }
+        setError(`Upload failed: ${batchError.message || 'Failed to import batch'}. All ${createdTenderIds.length} created tenders have been rolled back.`)
+        setImporting(false)
+        return
       }
+
+      // Final progress update
+      setImportProgress({
+        current: totalSuccessCount,
+        total: tendersToImport.length,
+        errors: []
+      })
+
+      // ALL-OR-NOTHING: Show success message
+      let resultMessage = `Successfully imported all ${totalSuccessCount} tenders.`
+      
+      if (warnings.length > 0) {
+        resultMessage += ` Warnings (${warnings.length}): ${warnings.slice(0, 3).join('; ')}`
+        if (warnings.length > 3) {
+          resultMessage += ` ... and ${warnings.length - 3} more warnings.`
+        }
+      }
+
+      setError(resultMessage)
+
+      // Reload data and close modal
+      await loadData()
+      setIsExcelUploadModalOpen(false)
+      setExcelFile(null)
+      setImportProgress({ current: 0, total: 0, errors: [] })
     } catch (error: any) {
       setError(error.message || 'Failed to import Excel file')
     } finally {
