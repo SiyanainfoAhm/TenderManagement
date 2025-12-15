@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { tenderService } from '@/services/tenderService'
 import { userService } from '@/services/userService'
 import { fileService } from '@/services/fileService'
-import { TenderWithUser, TenderFormData, CompanyMember } from '@/types'
+import { TenderWithUser, TenderFormData, CompanyMember, ValidationSummary, RowValidationResult } from '@/types'
 import MainLayout from '@/components/layout/MainLayout'
 import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
@@ -13,6 +13,7 @@ import TextArea from '@/components/base/TextArea'
 import BulletTextArea from '@/components/base/BulletTextArea'
 import Modal from '@/components/base/Modal'
 import Badge from '@/components/base/Badge'
+import ExcelValidationSummaryModal from '@/components/excel/ExcelValidationSummaryModal'
 import * as XLSX from 'xlsx'
 import {
   truncateField,
@@ -49,6 +50,9 @@ export default function Tenders() {
   const [excelDragActive, setExcelDragActive] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, errors: [] as string[] })
+  const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null)
+  const [showUploadConfirmation, setShowUploadConfirmation] = useState(false)
+  const [pendingValidTenders, setPendingValidTenders] = useState<TenderFormData[]>([])
 
   // Filter states (pending - not yet applied)
   const [filters, setFilters] = useState({
@@ -821,7 +825,276 @@ export default function Tenders() {
     }
   }
 
-  // Parse Excel and import tenders
+  // Validate Excel data and return validation summary (per flowchart)
+  const validateExcelData = async (
+    data: any[][],
+    headers: string[],
+    headerMap: { [key: string]: string },
+    userMap: Map<string, string>
+  ): Promise<ValidationSummary> => {
+    const rowResults: RowValidationResult[] = []
+    const warnings: string[] = []
+
+    // Process all rows and track errors per row
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i]
+      if (!row || row.every((cell: any) => !cell)) continue // Skip empty rows
+
+      const rowNumber = i + 1
+      const rowErrors: string[] = []
+      const rowWarnings: string[] = []
+      let tenderData: any = null
+
+      try {
+        tenderData = {
+          tender_name: '',
+          msme_exempted: false,
+          startup_exempted: false,
+          emd_amount: '0',
+          tender_fees: '0',
+          tender_cost: '0',
+          status: 'new',
+          assigned_to: '',
+          tender247_id: '',
+          gem_eprocure_id: '',
+          portal_link: '',
+          source: '',
+          tender_type: '',
+          location: '',
+          last_date: '',
+          expected_start_date: '',
+          expected_end_date: '',
+          expected_days: '',
+          tender_notes: '',
+          pq_criteria: ''
+        }
+
+        // Map row data to tender fields with validation
+        headers.forEach((header, index) => {
+          const fieldName = headerMap[header]
+          if (!fieldName || row[index] === undefined || row[index] === null) return
+
+          const originalValue = String(row[index])
+          let value = originalValue.trim()
+
+          // Handle boolean fields
+          if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
+            tenderData[fieldName] = parseBoolean(value)
+            return
+          }
+
+          // Handle assigned_to field
+          if (fieldName === 'assigned_to') {
+            const userId = userMap.get(value.toLowerCase())
+            tenderData[fieldName] = userId || ''
+            if (value && !userId) {
+              rowWarnings.push(`User "${value}" not found for "Assigned To" field`)
+            }
+            return
+          }
+
+          // Handle date fields
+          if (fieldName === 'last_date' || fieldName === 'expected_start_date' || fieldName === 'expected_end_date') {
+            const dateValidation = validateDate(value, header)
+            if (!dateValidation.valid) {
+              rowErrors.push(dateValidation.error || 'Invalid date format')
+              return
+            }
+            if (dateValidation.warning) {
+              rowWarnings.push(dateValidation.warning)
+            }
+            tenderData[fieldName] = dateValidation.normalizedValue || ''
+            return
+          }
+
+          // Handle amount fields
+          if (fieldName === 'emd_amount' || fieldName === 'tender_fees' || fieldName === 'tender_cost') {
+            const amountValidation = validateAmount(value, header)
+            if (!amountValidation.valid) {
+              rowErrors.push(amountValidation.error || 'Invalid amount format')
+              return
+            }
+            tenderData[fieldName] = amountValidation.normalizedValue || '0'
+            return
+          }
+
+          // Handle status field
+          if (fieldName === 'status') {
+            const statusValidation = validateStatus(value)
+            if (!statusValidation.valid) {
+              rowErrors.push(statusValidation.error || 'Invalid status')
+              return
+            }
+            tenderData[fieldName] = statusValidation.normalizedValue || 'new'
+            return
+          }
+
+          // Handle source field
+          if (fieldName === 'source') {
+            const sourceValidation = validateSource(value)
+            if (!sourceValidation.valid) {
+              rowErrors.push(sourceValidation.error || 'Invalid source')
+              return
+            }
+            tenderData[fieldName] = sourceValidation.normalizedValue || ''
+            return
+          }
+
+          // Handle text fields with truncation
+          const truncationResult = truncateField(fieldName, value, originalValue.length)
+          if (truncationResult.truncated && truncationResult.warning) {
+            rowWarnings.push(truncationResult.warning)
+          }
+          tenderData[fieldName] = truncationResult.value
+        })
+
+        // Validate required fields
+        const nameValidation = validateTenderName(tenderData.tender_name)
+        if (!nameValidation.valid) {
+          rowErrors.push(nameValidation.error || 'Tender Name is required')
+        } else {
+          tenderData.tender_name = nameValidation.normalizedValue || tenderData.tender_name
+        }
+
+        // Add warnings to global warnings
+        rowWarnings.forEach(w => warnings.push(`Row ${rowNumber}: ${w}`))
+
+        // Create row result
+        rowResults.push({
+          rowNumber,
+          tenderData: rowErrors.length === 0 ? tenderData as TenderFormData : null,
+          isValid: rowErrors.length === 0,
+          errors: rowErrors,
+          isDuplicate: false, // Will be checked later
+          warnings: rowWarnings.length > 0 ? rowWarnings : undefined
+        })
+      } catch (rowError: any) {
+        rowResults.push({
+          rowNumber,
+          tenderData: null,
+          isValid: false,
+          errors: [rowError.message || 'Invalid data'],
+          isDuplicate: false
+        })
+      }
+    }
+
+    // Check duplicates for valid rows
+    const validRows = rowResults.filter(r => r.isValid && r.tenderData)
+    if (validRows.length > 0 && selectedCompany) {
+      const existingIds = await tenderService.getAllTenderIds(selectedCompany.company_id)
+      
+      for (const rowResult of validRows) {
+        if (rowResult.tenderData) {
+          const duplicateCheck = tenderService.checkDuplicatesInMemory(
+            rowResult.tenderData.tender247_id,
+            rowResult.tenderData.gem_eprocure_id,
+            existingIds
+          )
+
+          if (duplicateCheck.isDuplicate) {
+            rowResult.isDuplicate = true
+            rowResult.duplicateReason = duplicateCheck.message
+            rowResult.isValid = false
+          }
+        }
+      }
+    }
+
+    // Categorize rows
+    const finalValidRows = rowResults.filter(r => r.isValid && !r.isDuplicate && r.tenderData)
+    const invalidRows = rowResults.filter(r => !r.isValid && !r.isDuplicate)
+    const duplicateRows = rowResults.filter(r => r.isDuplicate)
+
+    return {
+      totalRows: data.length - 1, // Exclude header
+      validRows: finalValidRows,
+      invalidRows,
+      duplicateRows,
+      errorCount: invalidRows.length,
+      duplicateCount: duplicateRows.length,
+      validCount: finalValidRows.length,
+      warnings
+    }
+  }
+
+  // Upload valid tenders only
+  const uploadValidTenders = async (validTenders: TenderFormData[]): Promise<{ success: number; errors: number }> => {
+    if (validTenders.length === 0) {
+      return { success: 0, errors: 0 }
+    }
+
+    setImportProgress({ current: 0, total: validTenders.length, errors: [] })
+    let lastProgressUpdate = 0
+    let lastProgressTime = Date.now()
+    const PROGRESS_UPDATE_INTERVAL = 100
+    const PROGRESS_UPDATE_STEP = 10
+    let totalSuccessCount = 0
+    const createdTenderIds: string[] = []
+    const uploadErrors: string[] = []
+
+    const BATCH_SIZE = 50
+
+    try {
+      for (let i = 0; i < validTenders.length; i += BATCH_SIZE) {
+        const batch = validTenders.slice(i, i + BATCH_SIZE)
+        const batchStartRow = i + 2
+
+        const result = await tenderService.createTendersBatch(
+          selectedCompany!.company_id,
+          user!.id,
+          batch
+        )
+
+        // Track successfully created tenders
+        result.success.forEach(tender => {
+          createdTenderIds.push(tender.id)
+        })
+        totalSuccessCount += result.success.length
+
+        // Track errors (shouldn't happen if validation was correct, but handle it)
+        result.errors.forEach(err => {
+          uploadErrors.push(`Row ${batchStartRow + err.index}: ${err.error}`)
+        })
+
+        // Throttle progress updates
+        const now = Date.now()
+        if (
+          totalSuccessCount - lastProgressUpdate >= PROGRESS_UPDATE_STEP ||
+          now - lastProgressTime >= PROGRESS_UPDATE_INTERVAL
+        ) {
+          setImportProgress({
+            current: totalSuccessCount,
+            total: validTenders.length,
+            errors: uploadErrors
+          })
+          lastProgressUpdate = totalSuccessCount
+          lastProgressTime = now
+        }
+      }
+
+      // Final progress update
+      setImportProgress({
+        current: totalSuccessCount,
+        total: validTenders.length,
+        errors: uploadErrors
+      })
+
+      return { success: totalSuccessCount, errors: uploadErrors.length }
+    } catch (batchError: any) {
+      // Rollback all created tenders on error
+      for (const tenderId of createdTenderIds) {
+        try {
+          await tenderService.deleteTender(tenderId)
+        } catch (deleteError) {
+          console.error('Failed to rollback tender:', deleteError)
+        }
+      }
+      throw batchError
+    }
+  }
+
+  // Parse Excel and import tenders (refactored per flowchart)
   const handleImportExcel = async () => {
     if (!excelFile || !user || !selectedCompany) return
 
@@ -880,7 +1153,7 @@ export default function Tenders() {
       }
 
       // OPTIMIZATION 1: Create user lookup Map for O(1) access
-      const userMap = new Map<string, string>() // Map<normalized_email_or_name, user_id>
+      const userMap = new Map<string, string>()
       users.forEach(u => {
         if (u.email) {
           userMap.set(u.email.toLowerCase(), u.user_id)
@@ -890,283 +1163,95 @@ export default function Tenders() {
         }
       })
 
-      // Process data rows
-      const errors: string[] = []
-      const warnings: string[] = []
-      const tendersToImport: TenderFormData[] = []
+      // FLOWCHART STEP: Validate Excel Data
+      const summary = await validateExcelData(data, headers, headerMap, userMap)
+
+      // FLOWCHART DECISION: Data Correct?
+      if (summary.validCount === summary.totalRows && summary.errorCount === 0 && summary.duplicateCount === 0) {
+        // TRUE: All data is valid - Upload directly
+        const validTenders = summary.validRows.map(r => r.tenderData!).filter(Boolean)
+        const result = await uploadValidTenders(validTenders)
+        
+        if (result.errors > 0) {
+          setError(`Upload completed with ${result.success} successful and ${result.errors} errors.`)
+        } else {
+          setError(`Successfully imported all ${result.success} tenders.`)
+        }
+
+        await loadData()
+        setIsExcelUploadModalOpen(false)
+        setExcelFile(null)
+        setImportProgress({ current: 0, total: 0, errors: [] })
+        setImporting(false)
+        return
+      }
+
+      // FALSE: Data has errors/duplicates - Show summary and ask user
+      setValidationSummary(summary)
+      const validTenders = summary.validRows.map(r => r.tenderData!).filter(Boolean)
+      setPendingValidTenders(validTenders)
+      setShowUploadConfirmation(true)
+      setImporting(false)
+    } catch (error: any) {
+      setError(error.message || 'Failed to import Excel file')
+      setImporting(false)
+    }
+  }
+
+  // Handle user confirmation to upload remaining valid data
+  const handleConfirmUploadRemaining = async () => {
+    if (pendingValidTenders.length === 0) {
+      setError('No valid tenders to upload')
+      setShowUploadConfirmation(false)
+      return
+    }
+
+    try {
+      setImporting(true)
+      setShowUploadConfirmation(false)
+      setError('')
+
+      const result = await uploadValidTenders(pendingValidTenders)
       
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i]
-        if (!row || row.every((cell: any) => !cell)) continue // Skip empty rows
-
-        try {
-          const rowNumber = i + 1
-          const tenderData: any = {
-            tender_name: '',
-            msme_exempted: false,
-            startup_exempted: false,
-            emd_amount: '0',
-            tender_fees: '0',
-            tender_cost: '0',
-            status: 'new',
-            assigned_to: '',
-            tender247_id: '',
-            gem_eprocure_id: '',
-            portal_link: '',
-            source: '',
-            tender_type: '',
-            location: '',
-            last_date: '',
-            expected_start_date: '',
-            expected_end_date: '',
-            expected_days: '',
-            tender_notes: '',
-            pq_criteria: ''
-          }
-
-          // PHASE 2: Map row data to tender fields with validation and truncation (config-driven)
-          headers.forEach((header, index) => {
-            const fieldName = headerMap[header]
-            if (!fieldName || row[index] === undefined || row[index] === null) return
-
-            const originalValue = String(row[index])
-            let value = originalValue.trim()
-            
-            // Handle boolean fields
-            if (fieldName === 'msme_exempted' || fieldName === 'startup_exempted') {
-              tenderData[fieldName] = parseBoolean(value)
-              return
-            }
-
-            // Handle assigned_to field
-            if (fieldName === 'assigned_to') {
-              // OPTIMIZATION 1: Use Map for O(1) lookup instead of linear search
-              const userId = userMap.get(value.toLowerCase())
-              tenderData[fieldName] = userId || ''
-              if (value && !userId) {
-                warnings.push(`Row ${rowNumber}: User "${value}" not found for "Assigned To" field`)
-              }
-              return
-            }
-
-            // Handle date fields
-            if (fieldName === 'last_date' || fieldName === 'expected_start_date' || fieldName === 'expected_end_date') {
-              const dateValidation = validateDate(value, header)
-              if (!dateValidation.valid) {
-                errors.push(`Row ${rowNumber}: ${dateValidation.error}`)
-                return
-              }
-              if (dateValidation.warning) {
-                warnings.push(`Row ${rowNumber}: ${dateValidation.warning}`)
-              }
-              tenderData[fieldName] = dateValidation.normalizedValue || ''
-              return
-            }
-
-            // Handle amount fields
-            if (fieldName === 'emd_amount' || fieldName === 'tender_fees' || fieldName === 'tender_cost') {
-              const amountValidation = validateAmount(value, header)
-              if (!amountValidation.valid) {
-                errors.push(`Row ${rowNumber}: ${amountValidation.error}`)
-                return
-              }
-              tenderData[fieldName] = amountValidation.normalizedValue || '0'
-              return
-            }
-
-            // Handle status field
-            if (fieldName === 'status') {
-              const statusValidation = validateStatus(value)
-              if (!statusValidation.valid) {
-                errors.push(`Row ${rowNumber}: ${statusValidation.error}`)
-                return
-              }
-              tenderData[fieldName] = statusValidation.normalizedValue || 'new'
-              return
-            }
-
-            // Handle source field
-            if (fieldName === 'source') {
-              const sourceValidation = validateSource(value)
-              if (!sourceValidation.valid) {
-                errors.push(`Row ${rowNumber}: ${sourceValidation.error}`)
-                return
-              }
-              tenderData[fieldName] = sourceValidation.normalizedValue || ''
-              return
-            }
-
-            // PHASE 2: Handle text fields with config-driven truncation
-            const truncationResult = truncateField(fieldName, value, originalValue.length)
-            if (truncationResult.truncated && truncationResult.warning) {
-              warnings.push(`Row ${rowNumber}: ${truncationResult.warning}`)
-            }
-            tenderData[fieldName] = truncationResult.value
-          })
-
-          // PHASE 2: Validate required fields using validation function
-          const nameValidation = validateTenderName(tenderData.tender_name)
-          if (!nameValidation.valid) {
-            errors.push(`Row ${rowNumber}: ${nameValidation.error}`)
-            continue
-          }
-          tenderData.tender_name = nameValidation.normalizedValue || tenderData.tender_name
-
-          tendersToImport.push(tenderData as TenderFormData)
-        } catch (rowError: any) {
-          errors.push(`Row ${i + 1}: ${rowError.message || 'Invalid data'}`)
-        }
-      }
-
-      // PHASE 2: Log warnings separately (non-blocking)
-      if (warnings.length > 0) {
-        console.warn('Excel Import Warnings:', warnings)
-      }
-
-      // ALL-OR-NOTHING VALIDATION: Check if there are any validation errors
-      if (errors.length > 0) {
-        setError(`Validation failed. Please fix all errors before uploading. Errors (${errors.length}): ${errors.slice(0, 10).join('; ')}${errors.length > 10 ? ` ... and ${errors.length - 10} more errors.` : ''}`)
-        setImporting(false)
-        return
-      }
-
-      if (tendersToImport.length === 0) {
-        setError('No valid tenders found in the Excel file')
-        setImporting(false)
-        return
-      }
-
-      // OPTIMIZATION 2: Fetch all existing tender IDs once for batch duplicate checking
-      setImportProgress({ current: 0, total: tendersToImport.length, errors: [] })
-      const existingIds = await tenderService.getAllTenderIds(selectedCompany.company_id)
-
-      // ALL-OR-NOTHING: Check ALL duplicates before uploading anything
-      const duplicateErrors: string[] = []
-
-      for (let i = 0; i < tendersToImport.length; i++) {
-        const duplicateCheck = tenderService.checkDuplicatesInMemory(
-          tendersToImport[i].tender247_id,
-          tendersToImport[i].gem_eprocure_id,
-          existingIds
-        )
-
-        if (duplicateCheck.isDuplicate) {
-          duplicateErrors.push(`Row ${i + 2}: ${duplicateCheck.message}`)
-        }
-      }
-
-      // ALL-OR-NOTHING: If any duplicates found, don't upload anything
-      if (duplicateErrors.length > 0) {
-        setError(`Duplicate IDs found. Please fix all duplicates before uploading. Errors (${duplicateErrors.length}): ${duplicateErrors.slice(0, 10).join('; ')}${duplicateErrors.length > 10 ? ` ... and ${duplicateErrors.length - 10} more errors.` : ''}`)
-        setImporting(false)
-        return
-      }
-
-      // ALL-OR-NOTHING: All validations passed, proceed with batch upload
-      setImportProgress({ current: 0, total: tendersToImport.length, errors: [] })
-      let lastProgressUpdate = 0
-      let lastProgressTime = Date.now()
-      const PROGRESS_UPDATE_INTERVAL = 100 // Update every 100ms
-      const PROGRESS_UPDATE_STEP = 10 // Or every 10 items
-      let totalSuccessCount = 0
-      const createdTenderIds: string[] = [] // Track all created tenders for rollback
-
-      // Process in batches
-      const BATCH_SIZE = 50
-
-      try {
-        for (let i = 0; i < tendersToImport.length; i += BATCH_SIZE) {
-          const batch = tendersToImport.slice(i, i + BATCH_SIZE)
-          const batchStartRow = i + 2 // +2 because row 1 is header, and we start from index 0
-          
-          const result = await tenderService.createTendersBatch(
-            selectedCompany.company_id,
-            user.id,
-            batch
-          )
-
-          // ALL-OR-NOTHING: If any batch insert fails, stop and rollback all
-          if (result.errors.length > 0) {
-            // Rollback: Delete all previously created tenders
-            for (const tenderId of createdTenderIds) {
-              try {
-                await tenderService.deleteTender(tenderId)
-              } catch (deleteError) {
-                console.error('Failed to rollback tender:', deleteError)
-              }
-            }
-            
-            // Stop import and show error
-            const errorMessages = result.errors.map(err => `Row ${batchStartRow + err.index}: ${err.error}`).join('; ')
-            setError(`Upload failed. All ${createdTenderIds.length} previously created tenders have been rolled back. Errors: ${errorMessages}`)
-            setImporting(false)
-            return
-          }
-
-          // Track successfully created tenders
-          result.success.forEach(tender => {
-            createdTenderIds.push(tender.id)
-          })
-          totalSuccessCount += result.success.length
-
-          // OPTIMIZATION 4: Throttle progress updates
-          const now = Date.now()
-          if (
-            totalSuccessCount - lastProgressUpdate >= PROGRESS_UPDATE_STEP ||
-            now - lastProgressTime >= PROGRESS_UPDATE_INTERVAL
-          ) {
-            setImportProgress({
-              current: totalSuccessCount,
-              total: tendersToImport.length,
-              errors: []
-            })
-            lastProgressUpdate = totalSuccessCount
-            lastProgressTime = now
-          }
-        }
-      } catch (batchError: any) {
-        // ALL-OR-NOTHING: If batch fails, rollback all created tenders and stop
-        for (const tenderId of createdTenderIds) {
-          try {
-            await tenderService.deleteTender(tenderId)
-          } catch (deleteError) {
-            console.error('Failed to rollback tender:', deleteError)
-          }
-        }
-        setError(`Upload failed: ${batchError.message || 'Failed to import batch'}. All ${createdTenderIds.length} created tenders have been rolled back.`)
-        setImporting(false)
-        return
-      }
-
-      // Final progress update
-      setImportProgress({
-        current: totalSuccessCount,
-        total: tendersToImport.length,
-        errors: []
-      })
-
-      // ALL-OR-NOTHING: Show success message
-      let resultMessage = `Successfully imported all ${totalSuccessCount} tenders.`
+      let resultMessage = `Successfully imported ${result.success} of ${pendingValidTenders.length} valid tenders.`
       
-      if (warnings.length > 0) {
-        resultMessage += ` Warnings (${warnings.length}): ${warnings.slice(0, 3).join('; ')}`
-        if (warnings.length > 3) {
-          resultMessage += ` ... and ${warnings.length - 3} more warnings.`
+      if (validationSummary) {
+        if (validationSummary.errorCount > 0) {
+          resultMessage += ` ${validationSummary.errorCount} row(s) had validation errors and were skipped.`
         }
+        if (validationSummary.duplicateCount > 0) {
+          resultMessage += ` ${validationSummary.duplicateCount} row(s) had duplicate IDs and were skipped.`
+        }
+        if (validationSummary.warnings.length > 0) {
+          resultMessage += ` ${validationSummary.warnings.length} warning(s) were logged.`
+        }
+      }
+
+      if (result.errors > 0) {
+        resultMessage += ` ${result.errors} error(s) occurred during upload.`
       }
 
       setError(resultMessage)
-
-      // Reload data and close modal
       await loadData()
       setIsExcelUploadModalOpen(false)
       setExcelFile(null)
       setImportProgress({ current: 0, total: 0, errors: [] })
+      setValidationSummary(null)
+      setPendingValidTenders([])
     } catch (error: any) {
-      setError(error.message || 'Failed to import Excel file')
+      setError(`Upload failed: ${error.message || 'Failed to upload valid tenders'}`)
     } finally {
       setImporting(false)
     }
+  }
+
+  // Handle user cancellation
+  const handleCancelUpload = () => {
+    setShowUploadConfirmation(false)
+    setValidationSummary(null)
+    setPendingValidTenders([])
+    setError('')
+    // Keep modal open so user can try again or close manually
   }
 
   const handleOpenExcelUpload = () => {
@@ -1181,6 +1266,9 @@ export default function Tenders() {
     setExcelFile(null)
     setError('')
     setImportProgress({ current: 0, total: 0, errors: [] })
+    setValidationSummary(null)
+    setShowUploadConfirmation(false)
+    setPendingValidTenders([])
   }
 
   const handleConfirmDelete = async () => {
@@ -2585,6 +2673,17 @@ export default function Tenders() {
             </div>
           </div>
         </Modal>
+
+        {/* Validation Summary Modal (per flowchart) */}
+        {validationSummary && (
+          <ExcelValidationSummaryModal
+            isOpen={showUploadConfirmation}
+            onClose={handleCancelUpload}
+            summary={validationSummary}
+            onConfirm={handleConfirmUploadRemaining}
+            onCancel={handleCancelUpload}
+          />
+        )}
       </div>
     </MainLayout>
   )

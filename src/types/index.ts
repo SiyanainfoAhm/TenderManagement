@@ -336,3 +336,25 @@ export interface CompanyAccessRequest {
   company_id: string
   role: 'admin' | 'user' | 'viewer'
 }
+
+// Excel Upload Validation Types
+export interface RowValidationResult {
+  rowNumber: number
+  tenderData: TenderFormData | null
+  isValid: boolean
+  errors: string[]
+  isDuplicate: boolean
+  duplicateReason?: string
+  warnings?: string[]
+}
+
+export interface ValidationSummary {
+  totalRows: number
+  validRows: RowValidationResult[]
+  invalidRows: RowValidationResult[]
+  duplicateRows: RowValidationResult[]
+  errorCount: number
+  duplicateCount: number
+  validCount: number
+  warnings: string[]
+}
