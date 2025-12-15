@@ -162,10 +162,12 @@ export default function Tenders() {
       filterParams.customEndDate = endDateParam
       loadData(filterParams)
     } else if (statusParam) {
-      // Only status filter, no date filter - still apply default 'today' filter
+      // Only status filter, no date filter - use 'all' to match Dashboard counts
+      setTimeFilter('all')
+      setAppliedTimeFilter('all')
       const filterParams: any = { 
-        status: statusParam,
-        timeFilter: 'today' // Apply today filter by default
+        status: statusParam
+        // No timeFilter = 'all' (fetch all data to match Dashboard)
       }
       loadData(filterParams)
     } else {
