@@ -199,16 +199,26 @@ export default function Dashboard() {
     return statusMap[label] ?? null
   }
 
-  // Handle status card click - navigate to tenders page with status filter
+  // Handle status card click - navigate to tenders page with status filter and date range
   const handleStatusCardClick = (label: string) => {
     const statusValue = getStatusValue(label)
-    if (statusValue === '') {
-      // Total Tenders - navigate without filter
-      navigate('/tenders')
-    } else if (statusValue) {
-      // Navigate with status filter
-      navigate(`/tenders?status=${statusValue}`)
+    
+    // Get current date filter from Dashboard (if applied)
+    const startDate = appliedStartDate && appliedStartDate.trim() !== '' ? appliedStartDate : undefined
+    const endDate = appliedEndDate && appliedEndDate.trim() !== '' ? appliedEndDate : undefined
+    
+    // Build URL with status and date filters
+    const params = new URLSearchParams()
+    if (statusValue) {
+      params.set('status', statusValue)
     }
+    if (startDate && endDate) {
+      params.set('startDate', startDate)
+      params.set('endDate', endDate)
+    }
+    
+    const queryString = params.toString()
+    navigate(`/tenders${queryString ? `?${queryString}` : ''}`)
   }
 
   // First row - shown by default (5 cards)

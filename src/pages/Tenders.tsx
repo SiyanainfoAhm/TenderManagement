@@ -72,13 +72,13 @@ export default function Tenders() {
     startupExempted: false
   })
 
-  // Time filter states (pending)
-  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('all')
+  // Time filter states (pending) - Default to 'today'
+  const [timeFilter, setTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('today')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
 
-  // Applied time filter states
-  const [appliedTimeFilter, setAppliedTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('all')
+  // Applied time filter states - Default to 'today'
+  const [appliedTimeFilter, setAppliedTimeFilter] = useState<'all' | 'today' | 'this_week' | 'last_week' | 'custom'>('today')
   const [appliedCustomStartDate, setAppliedCustomStartDate] = useState('')
   const [appliedCustomEndDate, setAppliedCustomEndDate] = useState('')
 
@@ -127,20 +127,49 @@ export default function Tenders() {
   })
 
   useEffect(() => {
-    // Check for status filter in URL params first
+    // Check for filters in URL params (status, startDate, endDate)
     const params = new URLSearchParams(location.search)
     const statusParam = params.get('status')
+    const startDateParam = params.get('startDate')
+    const endDateParam = params.get('endDate')
     
+    // Apply status filter if present
     if (statusParam) {
-      // Set the status filter and apply it
       setFilters(prev => ({ ...prev, status: statusParam }))
       setAppliedFilters(prev => ({ ...prev, status: statusParam }))
-      // Apply the filter immediately
-      const filterParams: any = { status: statusParam }
+    }
+    
+    // Apply date filters if present (from Dashboard status card click)
+    if (startDateParam && endDateParam) {
+      setTimeFilter('custom')
+      setAppliedTimeFilter('custom')
+      setCustomStartDate(startDateParam)
+      setAppliedCustomStartDate(startDateParam)
+      setCustomEndDate(endDateParam)
+      setAppliedCustomEndDate(endDateParam)
+      
+      // Build filter params with status and date filters
+      const filterParams: any = {}
+      if (statusParam) {
+        filterParams.status = statusParam
+      }
+      filterParams.timeFilter = 'custom'
+      filterParams.customStartDate = startDateParam
+      filterParams.customEndDate = endDateParam
+      loadData(filterParams)
+    } else if (statusParam) {
+      // Only status filter, no date filter - still apply default 'today' filter
+      const filterParams: any = { 
+        status: statusParam,
+        timeFilter: 'today' // Apply today filter by default
+      }
       loadData(filterParams)
     } else {
-      // No status filter - load all data
-      loadData()
+      // No URL filters - load with default 'today' filter
+      // Update appliedTimeFilter to ensure it's set
+      setAppliedTimeFilter('today')
+      const filterParams: any = { timeFilter: 'today' }
+      loadData(filterParams)
     }
   }, [user, selectedCompany, location.search])
 
