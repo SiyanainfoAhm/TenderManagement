@@ -254,6 +254,13 @@ export default function BidFeesPage() {
   const [showTenderDropdown, setShowTenderDropdown] = useState(false)
   const [filteredTenders, setFilteredTenders] = useState<TenderWithUser[]>([])
   const [formError, setFormError] = useState<string | null>(null)
+  type SummaryFilterType = 'none' | 'remaining' | 'refundable' | 'refunded' | 'nonRefundable' | 'all'
+  const [summaryFilter, setSummaryFilter] = useState<SummaryFilterType>('none')
+
+  const handleSummaryFilterClick = (filter: SummaryFilterType) => {
+    setSummaryFilter(prev => (prev === filter ? 'none' : filter))
+    setCurrentPage(1)
+  }
 
   const debouncedFilterReference = useMemo(() => filters, [filters])
 
@@ -366,13 +373,23 @@ export default function BidFeesPage() {
     return {
       totalRefundable,
       totalRefunded,
+      remainingAmount: totalRefundable - totalRefunded,
       totalNonRefundable,
       totalAmount
     }
   }, [allBidFees])
 
+  const feesForSummaryFilter = useMemo(() => {
+    if (summaryFilter === 'none' || summaryFilter === 'all') return allBidFees
+    if (summaryFilter === 'refundable') return allBidFees.filter(f => f.refundable)
+    if (summaryFilter === 'refunded') return allBidFees.filter(f => f.status === 'refunded')
+    if (summaryFilter === 'remaining') return allBidFees.filter(f => f.refundable && f.status !== 'refunded')
+    if (summaryFilter === 'nonRefundable') return allBidFees.filter(f => !f.refundable)
+    return allBidFees
+  }, [allBidFees, summaryFilter])
+
   const sortedFees = useMemo(() => {
-    const data = [...allBidFees]
+    const data = [...feesForSummaryFilter]
     data.sort((a, b) => {
       const directionFactor = sortConfig.direction === 'asc' ? 1 : -1
       let aValue: number | string | null = null
@@ -414,7 +431,7 @@ export default function BidFeesPage() {
     })
 
     return data
-  }, [allBidFees, sortConfig])
+  }, [feesForSummaryFilter, sortConfig])
 
   const totalPages = Math.max(1, Math.ceil(sortedFees.length / itemsPerPage))
   const currentFees = useMemo(() => {
@@ -424,6 +441,18 @@ export default function BidFeesPage() {
 
   const activeFilters = useMemo(() => {
     const chips: { type: string; label: string; value?: string }[] = []
+
+    if (summaryFilter !== 'none') {
+      const labels: Record<SummaryFilterType, string> = {
+        none: '',
+        all: 'Total Amount',
+        remaining: 'Remaining Amount',
+        refundable: 'Refundable',
+        refunded: 'Refunded',
+        nonRefundable: 'Non-Refundable'
+      }
+      chips.push({ type: 'summaryFilter', label: labels[summaryFilter], value: summaryFilter })
+    }
 
     if (filters.search) {
       chips.push({ type: 'search', label: `Search: ${filters.search}`, value: filters.search })
@@ -485,6 +514,10 @@ export default function BidFeesPage() {
 
   const removeFilter = (type: string, value?: string) => {
     switch (type) {
+      case 'summaryFilter':
+        setSummaryFilter('none')
+        setCurrentPage(1)
+        break
       case 'search':
         setFilters(prev => ({ ...prev, search: '' }))
         break
@@ -1932,33 +1965,75 @@ export default function BidFeesPage() {
           {allBidFees.length > 0 && (
             <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-center gap-6 overflow-x-auto">
-                <div className="text-center min-w-[180px]">
+                <button
+                  type="button"
+                  onClick={() => handleSummaryFilterClick('refundable')}
+                  className={`text-center min-w-[180px] rounded-lg p-3 transition-all hover:bg-gray-50 cursor-pointer ${
+                    summaryFilter === 'refundable' ? 'ring-2 ring-green-500 bg-green-50' : ''
+                  }`}
+                  title="Click to filter fees by refundable amount"
+                >
                   <p className="text-xs text-gray-500 mb-1">TOTAL REFUNDABLE</p>
                   <p className="text-2xl font-semibold text-green-600">
                     {formatCurrency(financialSummary.totalRefundable)}
                   </p>
-                </div>
+                </button>
                 
-                <div className="text-center min-w-[180px]">
+                <button
+                  type="button"
+                  onClick={() => handleSummaryFilterClick('refunded')}
+                  className={`text-center min-w-[180px] rounded-lg p-3 transition-all hover:bg-gray-50 cursor-pointer ${
+                    summaryFilter === 'refunded' ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                  }`}
+                  title="Click to filter fees by refunded amount"
+                >
                   <p className="text-xs text-gray-500 mb-1">TOTAL REFUNDED</p>
                   <p className="text-2xl font-semibold text-blue-600">
                     {formatCurrency(financialSummary.totalRefunded)}
                   </p>
-                </div>
+                </button>
                 
-                <div className="text-center min-w-[180px] border-l border-gray-200 pl-6">
+                <button
+                  type="button"
+                  onClick={() => handleSummaryFilterClick('remaining')}
+                  className={`text-center min-w-[180px] rounded-lg p-3 transition-all hover:bg-gray-50 cursor-pointer border-l border-gray-200 pl-6 ${
+                    summaryFilter === 'remaining' ? 'ring-2 ring-amber-500 bg-amber-50' : ''
+                  }`}
+                  title="Click to filter fees by remaining amount (refundable not yet refunded)"
+                >
+                  <p className="text-xs text-gray-500 mb-1">REMAINING AMOUNT</p>
+                  <p className="text-2xl font-semibold text-amber-600">
+                    {formatCurrency(financialSummary.remainingAmount)}
+                  </p>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => handleSummaryFilterClick('nonRefundable')}
+                  className={`text-center min-w-[180px] rounded-lg p-3 transition-all hover:bg-gray-50 cursor-pointer border-l border-gray-200 pl-6 ${
+                    summaryFilter === 'nonRefundable' ? 'ring-2 ring-red-500 bg-red-50' : ''
+                  }`}
+                  title="Click to filter fees by non-refundable amount"
+                >
                   <p className="text-xs text-gray-500 mb-1">TOTAL NON-REFUNDABLE</p>
                   <p className="text-2xl font-semibold text-red-600">
                     {formatCurrency(financialSummary.totalNonRefundable)}
                   </p>
-                </div>
+                </button>
                 
-                <div className="text-center min-w-[180px] border-l border-gray-200 pl-6">
+                <button
+                  type="button"
+                  onClick={() => handleSummaryFilterClick('all')}
+                  className={`text-center min-w-[180px] rounded-lg p-3 transition-all hover:bg-gray-50 cursor-pointer border-l border-gray-200 pl-6 ${
+                    summaryFilter === 'all' ? 'ring-2 ring-gray-700 bg-gray-50' : ''
+                  }`}
+                  title="Click to show all fees"
+                >
                   <p className="text-xs text-gray-500 mb-1">TOTAL AMOUNT</p>
                   <p className="text-2xl font-semibold text-gray-900">
                     {formatCurrency(financialSummary.totalAmount)}
                   </p>
-                </div>
+                </button>
               </div>
             </section>
           )}
