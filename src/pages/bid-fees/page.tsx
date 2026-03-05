@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import MainLayout from '@/components/layout/MainLayout'
 import Button from '@/components/base/Button'
 import Input from '@/components/base/Input'
@@ -256,10 +256,14 @@ export default function BidFeesPage() {
   const [formError, setFormError] = useState<string | null>(null)
   type SummaryFilterType = 'none' | 'remaining' | 'refundable' | 'refunded' | 'nonRefundable' | 'all'
   const [summaryFilter, setSummaryFilter] = useState<SummaryFilterType>('none')
+  const listSectionRef = useRef<HTMLElement | null>(null)
 
   const handleSummaryFilterClick = (filter: SummaryFilterType) => {
     setSummaryFilter(prev => (prev === filter ? 'none' : filter))
     setCurrentPage(1)
+    setTimeout(() => {
+      listSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
   }
 
   const debouncedFilterReference = useMemo(() => filters, [filters])
@@ -1815,7 +1819,7 @@ export default function BidFeesPage() {
             )}
           </section>
 
-          <section className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <section ref={listSectionRef} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
