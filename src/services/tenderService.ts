@@ -330,6 +330,7 @@ export const tenderService = {
   },
 
   // Check if Tender247 ID or GEM/Eprocure ID already exists (case-insensitive)
+  // Uses targeted DB queries instead of fetch-all to avoid Supabase 1000-row limit
   async checkDuplicateIds(
     companyId: string,
     tender247Id: string | undefined,
@@ -337,52 +338,54 @@ export const tenderService = {
     excludeTenderId?: string
   ): Promise<{ isDuplicate: boolean; message: string }> {
     const messages: string[] = []
+    const trimmedTender247Id = tender247Id?.trim()
+    const trimmedGemEprocureId = gemEprocureId?.trim()
 
-    // Fetch all tenders for the company to do case-insensitive comparison
-    let query = supabase
-      .from(getTableName('tenders'))
-      .select('id, tender247_id, gem_eprocure_id')
-      .eq('company_id', companyId)
+    // Check Tender247 ID - Company ID & Tender247 ID uniqueness (case-insensitive via ilike)
+    if (trimmedTender247Id) {
+      let t247Query = supabase
+        .from(getTableName('tenders'))
+        .select('id')
+        .eq('company_id', companyId)
+        .ilike('tender247_id', trimmedTender247Id)
+        .limit(1)
 
-    if (excludeTenderId) {
-      query = query.neq('id', excludeTenderId)
-    }
+      if (excludeTenderId) {
+        t247Query = t247Query.neq('id', excludeTenderId)
+      }
 
-    const { data, error } = await query
+      const { data: t247Data, error: t247Error } = await t247Query
 
-    if (error) {
-      throw new Error(error.message || 'Failed to check for duplicate IDs')
-    }
+      if (t247Error) {
+        throw new Error(t247Error.message || 'Failed to check for duplicate IDs')
+      }
 
-    if (!data || data.length === 0) {
-      return { isDuplicate: false, message: '' }
-    }
-
-    // Normalize input IDs to lowercase for comparison
-    const normalizedTender247Id = tender247Id?.trim().toLowerCase()
-    const normalizedGemEprocureId = gemEprocureId?.trim().toLowerCase()
-
-    // Check Tender247 ID (case-insensitive)
-    if (normalizedTender247Id) {
-      const duplicate = data.find(
-        (tender) => tender.tender247_id && 
-        tender.tender247_id.toLowerCase() === normalizedTender247Id
-      )
-      
-      if (duplicate) {
-        messages.push(`Tender247 ID "${tender247Id.trim()}" already exists`)
+      if (t247Data && t247Data.length > 0) {
+        messages.push('Tender247 ID is already exists')
       }
     }
 
-    // Check GEM/Eprocure ID (case-insensitive)
-    if (normalizedGemEprocureId) {
-      const duplicate = data.find(
-        (tender) => tender.gem_eprocure_id && 
-        tender.gem_eprocure_id.toLowerCase() === normalizedGemEprocureId
-      )
-      
-      if (duplicate) {
-        messages.push(`GEM/Eprocure ID "${gemEprocureId.trim()}" already exists`)
+    // Check GEM/Eprocure ID - Company ID & GEM/Eprocure ID uniqueness (case-insensitive via ilike)
+    if (trimmedGemEprocureId) {
+      let gemQuery = supabase
+        .from(getTableName('tenders'))
+        .select('id')
+        .eq('company_id', companyId)
+        .ilike('gem_eprocure_id', trimmedGemEprocureId)
+        .limit(1)
+
+      if (excludeTenderId) {
+        gemQuery = gemQuery.neq('id', excludeTenderId)
+      }
+
+      const { data: gemData, error: gemError } = await gemQuery
+
+      if (gemError) {
+        throw new Error(gemError.message || 'Failed to check for duplicate IDs')
+      }
+
+      if (gemData && gemData.length > 0) {
+        messages.push('GEM/Eprocure ID is already exists')
       }
     }
 
@@ -407,14 +410,14 @@ export const tenderService = {
     if (tender247Id) {
       const normalized = tender247Id.trim().toLowerCase()
       if (normalized && existingIds.tender247Ids.has(normalized)) {
-        messages.push(`Tender247 ID "${tender247Id.trim()}" already exists`)
+        messages.push('Tender247 ID is already exists')
       }
     }
 
     if (gemEprocureId) {
       const normalized = gemEprocureId.trim().toLowerCase()
       if (normalized && existingIds.gemEprocureIds.has(normalized)) {
-        messages.push(`GEM/Eprocure ID "${gemEprocureId.trim()}" already exists`)
+        messages.push('GEM/Eprocure ID is already exists')
       }
     }
 
@@ -437,8 +440,8 @@ export const tenderService = {
     
     const tenderData = {
       company_id: companyId,
-      tender247_id: formData.tender247_id || null,
-      gem_eprocure_id: formData.gem_eprocure_id || null,
+      tender247_id: formData.tender247_id?.trim() || null,
+      gem_eprocure_id: formData.gem_eprocure_id?.trim() || null,
       portal_link: formData.portal_link || null,
       tender_name: formData.tender_name,
       source: formData.source || null,

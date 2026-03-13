@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { tenderService } from '@/services/tenderService'
@@ -105,6 +105,8 @@ export default function Tenders() {
   const [viewAttachments, setViewAttachments] = useState<any[]>([])
   const [viewAttachmentsLoading, setViewAttachmentsLoading] = useState(false)
   const [viewAttachmentsError, setViewAttachmentsError] = useState<string | null>(null)
+
+  const formErrorRef = useRef<HTMLDivElement | null>(null)
 
   // Form data
   const [formData, setFormData] = useState<TenderFormData>({
@@ -620,12 +622,28 @@ export default function Tenders() {
   }
 
 
+  const validateRequiredFields = (): string | null => {
+    if (!formData.tender_name?.trim()) return 'Tender Name is required'
+    if (!formData.source?.trim()) return 'Tender Source is required'
+    if (!formData.tender_type?.trim()) return 'Tender Type is required'
+    if (!formData.location?.trim()) return 'Location is required'
+    return null
+  }
+
   const handleSubmitAdd = async () => {
     if (!user || !selectedCompany) return
 
     try {
       setSubmitting(true)
       setError('')
+
+      const requiredError = validateRequiredFields()
+      if (requiredError) {
+        setError(requiredError)
+        setSubmitting(false)
+        setTimeout(() => formErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+        return
+      }
       
       // Validate reason for statuses that require it
       if ((formData.status === 'not-bidding' || formData.status === 'not-qualified') && !formData.not_bidding_reason?.trim()) {
@@ -644,6 +662,9 @@ export default function Tenders() {
       if (duplicateCheck.isDuplicate) {
         setError(duplicateCheck.message)
         setSubmitting(false)
+        setTimeout(() => {
+          formErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 50)
         return
       }
       
@@ -689,6 +710,14 @@ export default function Tenders() {
     try {
       setSubmitting(true)
       setError('')
+
+      const requiredError = validateRequiredFields()
+      if (requiredError) {
+        setError(requiredError)
+        setSubmitting(false)
+        setTimeout(() => formErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+        return
+      }
       
       // Validate reason for statuses that require it
       if ((formData.status === 'not-bidding' || formData.status === 'not-qualified') && !formData.not_bidding_reason?.trim()) {
@@ -708,6 +737,9 @@ export default function Tenders() {
       if (duplicateCheck.isDuplicate) {
         setError(duplicateCheck.message)
         setSubmitting(false)
+        setTimeout(() => {
+          formErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 50)
         return
       }
       
@@ -1595,7 +1627,7 @@ export default function Tenders() {
   ]
 
   const renderFormFields = () => (
-    <div className="space-y-4">
+    <div ref={formErrorRef} className="space-y-4">
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start">
           <i className="ri-error-warning-line text-red-600 text-xl mr-2 flex-shrink-0"></i>
